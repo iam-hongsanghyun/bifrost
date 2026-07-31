@@ -32,7 +32,7 @@ from typing import Any, AsyncIterator, Callable, Protocol
 # Ragnarok journals every mutation at its own store facade, whoever made it,
 # so Bifrost keeps no second journal — it reads Ragnarok's over HTTP when it
 # needs the timeline. Only the local event bus (chat streaming) is ours.
-from .. import events_bus, ragnarok
+from .. import assumptions, events_bus, ragnarok
 from . import approvals, auth, policy, prompts, questions, transcript
 
 logger = logging.getLogger("pypsa_gui.agent")
@@ -185,7 +185,7 @@ class AgentSession:
             "chat.message", "tool.start", "tool.end", "agent.status",
             "approval.request", "approval.resolved",
             "question.request", "question.resolved",
-            "chart.show",
+            "chart.show", "assumption.recorded",
         ):
             transcript.append(self.session_id, self.conversation_id, event, data)
 
@@ -309,7 +309,7 @@ class AgentSession:
             "x": x,
             "series": series,
         }
-        self._publish("chart.show", payload)
+        self._publish("chart.show", "assumption.recorded", payload)
         return f"Drawn: {payload['title']} ({len(series)} series, {len(x)} points)."
 
     async def _handle_ask_user(self, args: dict[str, Any]) -> str:
@@ -540,6 +540,40 @@ def _sdk_backend(session: AgentSession) -> AgentBackend:
         return {"content": [{"type": "text", "text": answer}]}
 
     @tool(
+        "record_assumption",
+        "Record a number you supplied yourself rather than took from data or from the "
+        "user. REQUIRED for any such value before you use it in the model — a "
+        "discount rate, a fuel price, an efficiency, a capacity factor, a cost. State "
+        "the basis honestly: 'assumed' when it is your own choice, 'user' when they "
+        "gave it, 'dataset' when it came from data, 'default' when it is the schema's. "
+        "This is what lets the modeller trace every figure back, so recording an "
+        "assumption is never optional and never something to batch until the end.",
+        {
+            "type": "object",
+            "properties": {
+                "subject": {"type": "string", "description": "What it applies to, e.g. 'discount rate', 'gas marginal cost'."},
+                "value": {"type": "string", "description": "The value as text — a range or 'n/a' is fine."},
+                "unit": {"type": "string", "description": "%/yr, $/MWh, MW, dimensionless …"},
+                "basis": {"type": "string", "enum": ["assumed", "user", "dataset", "default"]},
+                "source": {
+                    "type": "string",
+                    "description": "Where it came from, or your reasoning if you chose it. Be specific: "
+                                   "'typical CCGT SRMC for Korea 2024' beats 'reasonable'.",
+                },
+                "affects": {"type": "string", "description": "What in the model or the result depends on it."},
+            },
+            "required": ["subject", "value", "basis"],
+        },
+    )
+    async def record_assumption(args: dict[str, Any]) -> dict[str, Any]:
+        entry = assumptions.record(session.conversation_id, **args)
+        session._publish("assumption.recorded", {
+            "conversationId": session.conversation_id, **entry,
+        })
+        return {"content": [{"type": "text", "text":
+            f"Recorded: {entry['subject']} = {entry['value']} {entry['unit']} ({entry['basis']})."}]}
+
+    @tool(
         "show_chart",
         "Draw a chart in the conversation. Use it for any result the user should SEE "
         "rather than read as a table — a dispatch or price series over snapshots, a "
@@ -612,7 +646,7 @@ def _sdk_backend(session: AgentSession) -> AgentBackend:
         return {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}]}
 
     bifrost_server = create_sdk_mcp_server(
-        name="bifrost", version="1.0.0", tools=[ask_user, show_chart, read_attachment]
+        name="bifrost", version="1.0.0", tools=[ask_user, record_assumption, show_chart, read_attachment]
     )
 
     agent_auth = auth.resolve()

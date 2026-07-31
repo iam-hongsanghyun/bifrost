@@ -52,6 +52,13 @@ export interface ChatEvent {
   series?: { name: string; values: number[] }[];
   unit?: string;
   note?: string;
+  /** assumption.recorded */
+  id?: string;
+  subject?: string;
+  value?: string;
+  basis?: string;
+  source?: string;
+  affects?: string;
   /** approval.request / approval.resolved */
   approvalId?: string;
   args?: Record<string, unknown>;
@@ -159,6 +166,7 @@ export function subscribeChat(
     'tool.start', 'tool.end',
     'approval.request', 'approval.resolved',
     'chart.show',
+    'assumption.recorded',
     'question.request', 'question.resolved',
   ];
   const handlers = kinds.map((kind) => {

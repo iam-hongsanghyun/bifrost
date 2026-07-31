@@ -192,3 +192,17 @@ kbd { font-family: var(--mono); font-size: 0.9em; border: 1px solid var(--border
 .chart-key strong { color: var(--text); font-family: var(--mono); font-size: 11px; }
 .chart-at { font-family: var(--mono); font-size: 11px; }
 .chart-note { margin: 5px 0 0; font-size: 12px; color: var(--muted); }
+
+/* ── Assumptions ─────────────────────────────────────────────────────────────
+   Shown where the number is made, not only in a register: an assumption the user
+   has to go looking for is one they will not check. `assumed` is tinted because
+   it is the agent's OWN choice — the case that needs a human's eye. */
+.assume { display: flex; gap: 8px; align-items: baseline; max-width: 76ch;
+          padding: 5px 10px; border-left: 2px solid var(--border);
+          font-size: 13px; }
+.assume--own { border-left-color: var(--warn);
+               background: color-mix(in srgb, var(--warn) 6%, transparent); }
+.assume-tag { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em;
+              color: var(--muted); font-family: var(--mono); flex: 0 0 auto; }
+.assume--own .assume-tag { color: var(--warn); }
+.assume-body em { color: var(--muted); font-style: normal; }

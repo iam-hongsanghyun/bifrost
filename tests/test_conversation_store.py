@@ -153,3 +153,55 @@ def test_a_deleted_active_conversation_does_not_resurrect(store: ConversationSto
     store.set_active(c.id)
     store.delete(c.id)
     assert store.get_active() is None
+
+
+def test_assumptions_are_recorded_and_travel_with_the_conversation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A number the agent supplied itself must be traceable afterwards.
+
+    The failure this prevents is real: on a live run the agent chose a 5% discount
+    rate, said in prose that it was "a harmless placeholder", and that value then sat
+    inside a solved model with nothing marking it as invented.
+    """
+    from bifrost import assumptions
+    from bifrost.conversations import store as store_module
+
+    local = ConversationStore(root=tmp_path / "conversations")
+    monkeypatch.setattr(store_module, "STORE", local)
+    monkeypatch.setattr(assumptions, "STORE", local)
+
+    c = local.create(title="Peak week")
+    assert assumptions.load(c.id) == []
+
+    entry = assumptions.record(
+        c.id, subject="discount rate", value="0.05", unit="/yr",
+        basis="assumed", source="no capex in this run, so it is inert",
+        affects="annuitised capital cost",
+    )
+    assert entry["basis"] == "assumed"
+    assert entry["id"]
+
+    # Superseding appends rather than replaces — how the model got here is part of
+    # the record, not just where it ended up.
+    assumptions.record(c.id, subject="discount rate", value="0.07", basis="user")
+    register = assumptions.load(c.id)
+    assert [a["value"] for a in register] == ["0.05", "0.07"]
+    assert [a["basis"] for a in register] == ["assumed", "user"]
+
+    # It lives in the conversation's own directory, so it travels with the project.
+    assert (local._dir(c.id) / "assumptions.json").exists()
+
+
+def test_an_unknown_basis_falls_back_to_assumed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The safe default is the one that flags the number for a human."""
+    from bifrost import assumptions
+    from bifrost.conversations import store as store_module
+
+    local = ConversationStore(root=tmp_path / "conversations")
+    monkeypatch.setattr(store_module, "STORE", local)
+    monkeypatch.setattr(assumptions, "STORE", local)
+    c = local.create()
+    assert assumptions.record(c.id, subject="x", value="1", basis="vibes")["basis"] == "assumed"

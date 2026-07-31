@@ -39,7 +39,8 @@ type Row =
   | { kind: 'plumbing'; count: number; key: string }
   | { kind: 'question'; event: ChatEvent; answered: string | null; key: string }
   | { kind: 'approval'; event: ChatEvent; decided: string | null; key: string }
-  | { kind: 'chart'; spec: ChartSpec; key: string };
+  | { kind: 'chart'; spec: ChartSpec; key: string }
+  | { kind: 'assumption'; event: ChatEvent; key: string };
 
 /**
  * Collapse the event stream into rows.
@@ -89,6 +90,10 @@ function toRows(events: ChatEvent[]): Row[] {
           series: event.series,
         },
       });
+      return;
+    }
+    if (event.kind === 'assumption.recorded') {
+      rows.push({ kind: 'assumption', event, key: `as-${event.id ?? index}` });
       return;
     }
     // The resolutions themselves are folded into the card above.
@@ -278,6 +283,18 @@ export function ChatPane(props: Props) {
             return (
               <ApprovalCard key={row.key} event={row.event} decided={row.decided}
                 onDecide={(id, d) => void props.onDecideApproval(id, d)} />
+            );
+          }
+          if (row.kind === 'assumption') {
+            const a = row.event;
+            return (
+              <div key={row.key} className={`assume${a.basis === 'assumed' ? ' assume--own' : ''}`}>
+                <span className="assume-tag">{a.basis}</span>
+                <span className="assume-body">
+                  <strong>{a.subject}</strong> = {a.value}{a.unit ? ` ${a.unit}` : ''}
+                  {a.source && <em> — {a.source}</em>}
+                </span>
+              </div>
             );
           }
           if (row.kind === 'chart') return <Chart key={row.key} spec={row.spec} />;

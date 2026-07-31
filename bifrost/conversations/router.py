@@ -60,13 +60,31 @@ def create_conversation(payload: CreatePayload) -> dict[str, Any]:
 
 @router.get("/{conversation_id}")
 def get_conversation(conversation_id: str) -> dict[str, Any]:
+    from .. import assumptions
+
     conversation = STORE.get(conversation_id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found.")
     return {
         **conversation.to_dict(has_project=STORE.has_project(conversation_id)),
         "events": STORE.events(conversation_id),
+        "assumptions": assumptions.load(conversation_id),
     }
+
+
+@router.get("/{conversation_id}/assumptions")
+def get_assumptions(conversation_id: str) -> dict[str, Any]:
+    """Every number the agent supplied itself, with its basis.
+
+    Separate from the transcript on purpose: "which figures are assumed?" is a
+    question about the model, and answering it should not require re-reading a
+    conversation.
+    """
+    from .. import assumptions
+
+    if STORE.get(conversation_id) is None:
+        raise HTTPException(status_code=404, detail="Conversation not found.")
+    return {"assumptions": assumptions.load(conversation_id)}
 
 
 @router.patch("/{conversation_id}")
@@ -202,10 +220,13 @@ async def activate_conversation(conversation_id: str) -> dict[str, Any]:
     except RagnarokError as exc:
         raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
 
+    from .. import assumptions
+
     STORE.set_active(conversation_id)
     return {
         **conversation.to_dict(has_project=data is not None),
         "events": STORE.events(conversation_id),
+        "assumptions": assumptions.load(conversation_id),
         "loaded": loaded,
         "sessionMeta": meta,
     }
