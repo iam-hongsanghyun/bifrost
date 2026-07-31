@@ -48,6 +48,24 @@ export default function App() {
     setGroups(next);
   }, []);
 
+  // The conversation's stored model must keep up with the transcript describing it.
+  // Snapshotting used to be a button nobody had a reason to press, so a model the
+  // agent built was lost the moment the session moved on. Captured here instead:
+  // when a turn finishes and Ragnarok's change counter has moved past what this
+  // conversation has saved, save it.
+  const lastSavedVersion = useRef<number | null>(null);
+  const autoSnapshot = useCallback(async (conversationId: string, version: number | null) => {
+    if (version === null || lastSavedVersion.current === version) return;
+    lastSavedVersion.current = version;
+    try {
+      await api.snapshot(conversationId);
+      await refreshRail();
+    } catch {
+      /* best-effort: a failed save must not interrupt the conversation, and the
+         next turn will try again. */
+    }
+  }, [refreshRail]);
+
   useEffect(() => {
     void (async () => {
       try {
@@ -57,7 +75,16 @@ export default function App() {
         setEngineInfo(eng);
         // Open on setup until an engine is both chosen AND up.
         setShowSetup(!eng.configured || !eng.process.running);
-        await refreshRail();
+        const rail = await api.listConversations();
+        setGroups(rail.groups);
+        // Resume where the user left off. Re-activating is what restores the model
+        // AND the transcript together, so the conversation continues rather than
+        // restarting beside a session whose contents nobody explained.
+        if (rail.activeId) {
+          const opened = await api.activate(rail.activeId);
+          setActiveId(rail.activeId);
+          setEvents(opened.events ?? []);
+        }
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Bifrost is not reachable.');
       }
@@ -111,6 +138,15 @@ export default function App() {
     setHealth(hp);
     if (eng.configured && eng.process.running) setShowSetup(false);
   }, []);
+
+  // A turn has finished (busy fell) and the model moved — persist it.
+  const wasBusy = useRef(false);
+  useEffect(() => {
+    if (wasBusy.current && !busy && activeId) {
+      void autoSnapshot(activeId, engineVersion);
+    }
+    wasBusy.current = busy;
+  }, [busy, activeId, engineVersion, autoSnapshot]);
 
   const select = async (id: string) => {
     setBusy(true);

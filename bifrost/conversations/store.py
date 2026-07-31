@@ -47,6 +47,10 @@ _ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _PROJECT_NAME = "project.zip"
 _META_NAME = "meta.json"
 _EVENTS_NAME = "events.json"
+#: Which conversation is live. Persisted so returning to Bifrost resumes where the
+#: user left off instead of dropping them on an empty shell next to a session that
+#: still holds their model.
+_ACTIVE_NAME = "active.json"
 
 #: Group a conversation lands in when the user has not filed it. A real name
 #: rather than ``None`` so the rail needs no special case for "loose" chats.
@@ -188,6 +192,25 @@ class ConversationStore:
     def read_project(self, conversation_id: str) -> bytes | None:
         path = self.project_path(conversation_id)
         return path.read_bytes() if self.has_project(conversation_id) else None
+
+    # ── the active conversation ───────────────────────────────────────────────
+    def get_active(self) -> str | None:
+        """The conversation that was live, if it still exists."""
+        path = self.root / _ACTIVE_NAME
+        if not path.exists():
+            return None
+        try:
+            raw = json.loads(path.read_text("utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return None
+        candidate = str(raw.get("id") or "").strip()
+        if not candidate or self.get(candidate) is None:
+            return None
+        return candidate
+
+    def set_active(self, conversation_id: str | None) -> None:
+        self.root.mkdir(parents=True, exist_ok=True)
+        self._write_json(self.root / _ACTIVE_NAME, {"id": conversation_id})
 
     # ── write ─────────────────────────────────────────────────────────────────
     def create(self, *, title: str = "New conversation", group: str = DEFAULT_GROUP) -> Conversation:

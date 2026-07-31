@@ -130,3 +130,26 @@ def test_a_store_reopened_from_disk_sees_everything(tmp_path: Path) -> None:
     assert (restored.title, restored.group, restored.project_version) == ("Persisted", "Korea 2030", 3)
     assert second.read_project(c.id) == b"PK\x03\x04blob"
     assert second.events(c.id) == [{"kind": "user", "text": "hi"}]
+
+
+def test_the_active_conversation_is_remembered_across_restarts(tmp_path: Path) -> None:
+    """Returning to Bifrost must resume, not restart.
+
+    Without this the user comes back to an empty shell beside a session that still
+    holds their model, with nothing explaining what is loaded.
+    """
+    root = tmp_path / "conversations"
+    first = ConversationStore(root=root)
+    c = first.create(title="Peak week")
+    assert first.get_active() is None
+    first.set_active(c.id)
+
+    assert ConversationStore(root=root).get_active() == c.id
+
+
+def test_a_deleted_active_conversation_does_not_resurrect(store: ConversationStore) -> None:
+    """A dangling active id would send the shell to a conversation that is gone."""
+    c = store.create()
+    store.set_active(c.id)
+    store.delete(c.id)
+    assert store.get_active() is None

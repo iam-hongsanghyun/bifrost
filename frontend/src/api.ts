@@ -73,7 +73,9 @@ export const api = {
   health: () => fetch('/api/health').then(json<Health>),
 
   listConversations: () =>
-    fetch('/api/conversations').then(json<{ groups: ConversationGroup[]; defaultGroup: string }>),
+    fetch('/api/conversations').then(
+      json<{ groups: ConversationGroup[]; defaultGroup: string; activeId: string | null }>,
+    ),
 
   createConversation: (title: string, group: string) =>
     fetch('/api/conversations', {

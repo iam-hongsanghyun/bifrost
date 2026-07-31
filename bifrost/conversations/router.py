@@ -39,8 +39,17 @@ class EventsPayload(BaseModel):
 
 @router.get("")
 def list_conversations() -> dict[str, Any]:
-    """Every conversation, bucketed by group, for the rail."""
-    return {"groups": STORE.grouped(), "defaultGroup": DEFAULT_GROUP}
+    """Every conversation, bucketed by group, plus which one was live.
+
+    `activeId` is what lets returning to Bifrost resume where the user left off,
+    rather than dropping them on an empty shell beside a session that still holds
+    their model.
+    """
+    return {
+        "groups": STORE.grouped(),
+        "defaultGroup": DEFAULT_GROUP,
+        "activeId": STORE.get_active(),
+    }
 
 
 @router.post("")
@@ -137,8 +146,46 @@ async def activate_conversation(conversation_id: str) -> dict[str, Any]:
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found.")
 
+    previous = STORE.get_active()
+    try:
+        meta_before = await CLIENT.session_meta()
+    except (RagnarokUnavailable, RagnarokError):
+        meta_before = {}
+
+    # Never destroy unsaved work. Whatever is in the session belongs to whichever
+    # conversation was last live, so capture it into THAT conversation before this
+    # one takes the session over. Snapshotting is otherwise manual, and a model the
+    # agent built but nobody pressed "Save model" for would be gone the moment the
+    # user came back to it.
+    if meta_before and previous and previous != conversation_id:
+        try:
+            outgoing = await CLIENT.export_project()
+            STORE.save_project(previous, outgoing, version=meta_before.get("version"))
+            logger.info("Auto-saved the model of conversation %s before switching", previous)
+        except (RagnarokUnavailable, RagnarokError):
+            logger.exception("Could not auto-save conversation %s; not switching", previous)
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Could not save the current model before switching, so the switch "
+                    "was cancelled rather than risk losing it."
+                ),
+            ) from None
+
     data = STORE.read_project(conversation_id)
     try:
+        if data is None and previous == conversation_id and meta_before:
+            # Re-opening the conversation that already owns the session — for
+            # example after a reload. Adopt what is loaded instead of clearing it:
+            # this is the case where clearing destroyed the model the agent had just
+            # built in this very conversation.
+            try:
+                adopted = await CLIENT.export_project()
+                STORE.save_project(conversation_id, adopted, version=meta_before.get("version"))
+                data = adopted
+                logger.info("Adopted the live session into conversation %s", conversation_id)
+            except (RagnarokUnavailable, RagnarokError):
+                logger.exception("Could not adopt the live session into %s", conversation_id)
         if data is None:
             await CLIENT.clear_session()
             loaded = None
@@ -155,6 +202,7 @@ async def activate_conversation(conversation_id: str) -> dict[str, Any]:
     except RagnarokError as exc:
         raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
 
+    STORE.set_active(conversation_id)
     return {
         **conversation.to_dict(has_project=data is not None),
         "events": STORE.events(conversation_id),
