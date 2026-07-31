@@ -21,8 +21,9 @@ from pathlib import Path
 
 _SERVER_SECRET_PREFIX = "RAGNAROK_SECRET_"
 SECRET_NAME_RE = re.compile(r"^[a-z0-9_]{1,64}$")
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-SECRETS_PATH = _REPO_ROOT / "backend" / "data" / "secrets.json"
+from .config import CONFIG
+
+SECRETS_PATH = CONFIG.secrets_path
 
 
 def env_secrets() -> dict[str, str]:

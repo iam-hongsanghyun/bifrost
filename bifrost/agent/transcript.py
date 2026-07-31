@@ -16,7 +16,9 @@ from typing import Any
 
 logger = logging.getLogger("pypsa_gui.agent.transcript")
 
-_DATA_DIR = Path(__file__).resolve().parents[2] / "data"
+from ..config import CONFIG
+
+_DATA_DIR = CONFIG.data_dir
 
 
 def _dir(session_id: str) -> Path:

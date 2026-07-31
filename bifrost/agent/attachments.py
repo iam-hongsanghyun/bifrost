@@ -14,7 +14,9 @@ import uuid
 from pathlib import Path
 from typing import Any, BinaryIO
 
-_DATA_DIR = Path(__file__).resolve().parents[2] / "data"
+from ..config import CONFIG
+
+_DATA_DIR = CONFIG.data_dir
 
 MAX_FILE_BYTES = 200 * 1024 * 1024
 MAX_FILES_PER_UPLOAD = 20

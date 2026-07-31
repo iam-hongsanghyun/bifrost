@@ -37,7 +37,9 @@ from . import approvals, auth, policy, prompts, questions, transcript
 
 logger = logging.getLogger("pypsa_gui.agent")
 
-_REPO_ROOT = Path(__file__).resolve().parents[3]
+from ..config import CONFIG
+
+_REPO_ROOT = CONFIG.repo_root
 
 MAX_TURNS = int(os.environ.get("RAGNAROK_AGENT_MAX_TURNS", "50"))
 MAX_BUDGET_USD = float(os.environ.get("RAGNAROK_AGENT_MAX_BUDGET_USD", "0") or 0) or None
@@ -537,7 +539,7 @@ def _sdk_backend(session: AgentSession) -> AgentBackend:
         "RAGNAROK_MCP_ACTOR": "agent",
         "RAGNAROK_MCP_CONVERSATION": session.conversation_id,
     }
-    workdir = _REPO_ROOT / "backend" / "data" / "agent" / "workdir"
+    workdir = CONFIG.agent_dir / "workdir"
     workdir.mkdir(parents=True, exist_ok=True)
     options = ClaudeAgentOptions(
         system_prompt=prompts.SYSTEM_PROMPT,

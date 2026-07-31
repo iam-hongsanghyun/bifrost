@@ -22,7 +22,9 @@ import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
+from . import events_bus
 from .config import CONFIG
 
 logging.basicConfig(level=logging.INFO)
@@ -46,6 +48,28 @@ from .conversations.router import router as _conversations_router  # noqa: E402
 
 app.include_router(_agent_router.router)
 app.include_router(_conversations_router)
+
+
+@app.get("/api/events")
+async def events(
+    session_id: str = "default", last_event_id: str | None = None
+) -> StreamingResponse:
+    """Bifrost's own SSE channel: chat deltas, tool start/end, approvals, questions.
+
+    Distinct from Ragnarok's ``session.version`` stream, which the browser
+    subscribes to directly — proxying it here would add a hop and buy nothing.
+    ``last_event_id`` replays what a reconnecting client missed, so a dropped
+    connection mid-answer does not lose the tail of it.
+    """
+    try:
+        last = int(last_event_id) if last_event_id else None
+    except ValueError:
+        last = None
+    return StreamingResponse(
+        events_bus.sse_stream(session_id, last),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.get("/api/health")

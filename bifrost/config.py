@@ -46,19 +46,36 @@ class Config:
     #: queue and polled, so no request here should be long-running.
     request_timeout_s: int
 
+    #: The repo root. Exposed so the agent can put it on a subprocess PYTHONPATH
+    #: without deriving it from its own nesting.
+    repo_root: Path = Path(".")
+
     @property
     def conversations_dir(self) -> Path:
         return self.data_dir / "conversations"
 
+    @property
+    def agent_dir(self) -> Path:
+        return self.data_dir / "agent"
+
+    @property
+    def secrets_path(self) -> Path:
+        return self.data_dir / "secrets.json"
+
     @classmethod
     def from_env(cls) -> "Config":
-        repo_root = Path(__file__).resolve().parents[2]
+        # `bifrost/config.py` → parents[1] is the repo root. Every other module
+        # takes its paths from CONFIG rather than recomputing this; five modules
+        # each deriving the root from their own depth is how the package rename
+        # silently pointed the data dir one level too high.
+        repo_root = Path(__file__).resolve().parents[1]
         return cls(
             ragnarok_api_base=os.environ.get(
                 "RAGNAROK_API_BASE", "http://127.0.0.1:8000"
             ).rstrip("/"),
             ragnarok_session_id=os.environ.get("RAGNAROK_SESSION_ID", "default"),
             data_dir=_env_path("BIFROST_DATA_DIR", repo_root / "backend" / "data"),
+            repo_root=repo_root,
             request_timeout_s=_env_int("BIFROST_REQUEST_TIMEOUT_S", 120),
         )
 
