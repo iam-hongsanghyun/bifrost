@@ -44,6 +44,8 @@ export interface ChatEvent {
 export interface ClientConfig {
   ragnarokBase: string;
   sessionId: string;
+  /** False on first run: the shell opens on setup instead of the chat. */
+  engineConfigured: boolean;
 }
 
 export interface Health {
@@ -170,3 +172,51 @@ export function subscribeEngine(
     source.close();
   };
 }
+
+// ── the engine: which Ragnarok, and is it up ────────────────────────────────
+
+export interface EngineRootCheck {
+  path: string;
+  valid: boolean;
+  reason: string;
+  interpreter: string | null;
+}
+
+export interface EngineProcessStatus {
+  /** 'bifrost' when we started it, 'external' when the user did, null when down. */
+  owner: 'bifrost' | 'external' | null;
+  running: boolean;
+  port: number;
+  root: string | null;
+  logPath: string | null;
+  exitCode: number | null;
+}
+
+export interface EngineInfo {
+  configured: boolean;
+  root: string | null;
+  check: EngineRootCheck | null;
+  apiBase: string;
+  process: EngineProcessStatus;
+  bifrostPython: string;
+  suggestions: EngineRootCheck[];
+}
+
+export const engineApi = {
+  get: () => fetch('/api/engine').then(json<EngineInfo>),
+  check: (path: string) =>
+    fetch('/api/engine/check', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path }),
+    }).then(json<EngineRootCheck>),
+  setRoot: (path: string) =>
+    fetch('/api/engine/root', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path }),
+    }).then(json<EngineInfo & { saved: boolean }>),
+  start: () => fetch('/api/engine/start', { method: 'POST' })
+    .then(json<{ started: boolean; reason: string } & EngineProcessStatus>),
+  stop: () => fetch('/api/engine/stop', { method: 'POST' })
+    .then(json<{ stopped: boolean; reason: string } & EngineProcessStatus>),
+  log: (lines = 60) => fetch(`/api/engine/log?lines=${lines}`).then(json<{ lines: string[] }>),
+};

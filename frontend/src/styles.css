@@ -90,3 +90,34 @@ code { font-family: var(--mono); font-size: 0.9em; }
             background: var(--surface); align-items: flex-end; }
 .composer textarea { flex: 1; resize: vertical; font: inherit; color: inherit; padding: 9px 11px;
                      border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); }
+
+/* ── First run: connect to an engine ─────────────────────────────────────────
+   A gate rather than a tab. With no engine there is no model to talk about, so
+   the chat would only offer a conversation that cannot do anything. */
+.setup { min-height: 100vh; display: flex; align-items: center; justify-content: center;
+         padding: 32px; background: var(--bg); }
+.setup-card { width: 100%; max-width: 620px; background: var(--surface);
+              border: 1px solid var(--border); border-radius: 12px; padding: 26px 28px; }
+.setup-card h1 { margin: 0 0 6px; font-size: 20px; }
+.setup-card h2 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase;
+                 letter-spacing: 0.06em; color: var(--muted); }
+.setup-block { margin-top: 22px; }
+.setup-hint { font-size: 12px; margin: 0 0 8px; }
+.setup-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.setup-row input { flex: 1; min-width: 260px; font: inherit; font-family: var(--mono);
+                   font-size: 12px; padding: 8px 10px; border: 1px solid var(--border);
+                   border-radius: var(--radius); background: var(--bg); color: inherit; }
+.setup-suggestion { display: flex; justify-content: space-between; align-items: center; gap: 12px;
+                    width: 100%; text-align: left; margin-bottom: 6px; padding: 9px 11px;
+                    background: var(--bg); border: 1px solid var(--border);
+                    border-radius: var(--radius); cursor: pointer; font: inherit; color: inherit; }
+.setup-suggestion:hover:not(:disabled) { border-color: var(--brand); }
+.setup-suggestion code { font-size: 12px; }
+.setup-ok { color: var(--brand); font-size: 12px; margin: 8px 0 0; }
+.setup-bad { color: var(--danger); font-size: 12px; margin: 8px 0 0; }
+.setup-log { max-height: 220px; overflow: auto; font-family: var(--mono); font-size: 11px;
+             background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+             padding: 10px; white-space: pre-wrap; }
+.setup-foot { margin: 22px 0 0; font-size: 11px; font-family: var(--mono); }
+kbd { font-family: var(--mono); font-size: 0.9em; border: 1px solid var(--border);
+      border-radius: 4px; padding: 0 4px; }

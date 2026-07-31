@@ -83,11 +83,22 @@ tests/            mirrors bifrost/
 frontend/         the shell
 ```
 
-## Commands
+## Running it
+
+Double-click **`bifrost.command`**. It builds the Python environment and the
+interface dependencies on first run, starts both halves, and opens the browser. It
+does *not* start Ragnarok — Bifrost asks which Ragnarok checkout to use, remembers
+it, and launches it from the app, so the launcher only ever brings up Bifrost.
+
+The window stays open while Bifrost runs; closing it stops both halves. Failures
+print what to do about them rather than vanishing.
+
+By hand:
 
 ```bash
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python -m uvicorn bifrost.main:app --port 8100 --reload
+cd frontend && npm install && npm run dev
 ```
 
 The agent SDK is optional (`requirements-agent.txt`), like Ragnarok's MCP extra:
@@ -105,6 +116,35 @@ an ASGI transport — its actual export/import endpoints and session store, no s
 start. It skips rather than fails when Ragnarok is not importable, so this suite stays
 runnable alone. Point it with `RAGNAROK_ROOT` (default `~/github/ragnarok`).
 
+## Choosing the engine
+
+First run opens a setup gate rather than the chat — with no engine there is no model
+to talk about, so offering a conversation first would offer one that cannot do
+anything.
+
+Bifrost probes the obvious places (a sibling `ragnarok/`, `~/github/ragnarok`) and
+offers what it finds; otherwise the path is pasted. A directory is accepted only
+when it really is a Ragnarok checkout — `backend/app/main.py` and
+`backend/requirements.txt` must exist — and refusal says which marker was missing.
+Accepting anything and failing later at the first API call would report the problem
+far from the choice that caused it.
+
+Bifrost starts the engine with the checkout's own `.venv-pypsa`, never the system
+interpreter: PyPSA, linopy and HiGHS are not there, so it would fail at import
+inside a subprocess nobody is watching. If the checkout has no environment yet,
+Bifrost says to run Ragnarok's own `run.command` once and stops rather than trying.
+
+Two behaviours worth knowing:
+
+- **It will not start a second engine.** If something already answers on the port,
+  Bifrost adopts it and labels it *started outside Bifrost*. Two engines writing one
+  session would interleave changes to the same model.
+- **It only stops what it started.** An engine you launched yourself is left alone;
+  closing it could discard work happening outside this app.
+
+The engine's own output is tailed into the setup screen, so a failed start is
+diagnosable there instead of only in a terminal you never opened.
+
 ## Configuration
 
 Copy `.env.example`. The two that matter:
@@ -119,8 +159,19 @@ Working and tested: the conversation store, the project-package binding, the Rag
 client, the ported agent service, and the round-trip proof that reopening a conversation
 restores its model — topology, time-series and time axis.
 
-Not built yet: the frontend shell. Its design is settled — a top-level tab bar toggling
-**Conversation** and **Ragnarok**, a left rail listing conversations grouped and
-reorderable, a Claude-Desktop-style transcript in the centre, and the Ragnarok tab
-embedding the real Ragnarok UI so the user confirms the work in the actual application
-rather than a reimplementation of it.
+Working: the launcher, the engine picker and supervisor, the conversation rail with
+groups, activation (switching conversation switches the model), the transcript and
+composer, and both event streams — Bifrost's for the chat and Ragnarok's
+`session.version` straight from the engine.
+
+**Known broken: the Ragnarok tab renders blank.** Not a layout bug — the iframe is
+present, sized and visible, and its `GET /` returns 200; Ragnarok is fine opened
+directly. The cause is that the UI on `localhost:5173` embedding the engine on
+`127.0.0.1:8000` is a *different origin*, so the frame gets partitioned storage and
+Ragnarok's boot, which reads `localStorage`, dies inside it.
+
+The fix is same-origin, and it is not a one-line proxy: both apps serve their API at
+`/api`, so putting Ragnarok behind a Bifrost path would send its own calls to
+Bifrost. Either Bifrost's API moves to its own prefix, or Ragnarok is served on a
+subpath with a matching API prefix. Now that Bifrost launches the engine it also
+controls the port, which makes proxying it on one origin the natural next step.

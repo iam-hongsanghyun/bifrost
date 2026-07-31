@@ -12,11 +12,12 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  api, ChatEvent, ClientConfig, Conversation, ConversationGroup, Health,
+  api, ChatEvent, ClientConfig, Conversation, ConversationGroup, EngineInfo, engineApi, Health,
   subscribeChat, subscribeEngine,
 } from './api';
 import { ChatPane } from './components/ChatPane';
 import { ConversationRail } from './components/ConversationRail';
+import { EngineSetup } from './components/EngineSetup';
 
 type Tab = 'conversation' | 'ragnarok';
 
@@ -31,6 +32,10 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [engineVersion, setEngineVersion] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [engine, setEngineInfo] = useState<EngineInfo | null>(null);
+  // Setup is a GATE, not a tab: with no engine there is no model to talk about, so
+  // showing the chat first would only offer a conversation that cannot do anything.
+  const [showSetup, setShowSetup] = useState(false);
 
   // The transcript is persisted as it grows, not only on close — a crashed tab
   // must not cost the conversation. Kept in a ref so the debounce does not need
@@ -46,9 +51,12 @@ export default function App() {
   useEffect(() => {
     void (async () => {
       try {
-        const [cfg, hp] = await Promise.all([api.config(), api.health()]);
+        const [cfg, hp, eng] = await Promise.all([api.config(), api.health(), engineApi.get()]);
         setConfig(cfg);
         setHealth(hp);
+        setEngineInfo(eng);
+        // Open on setup until an engine is both chosen AND up.
+        setShowSetup(!eng.configured || !eng.process.running);
         await refreshRail();
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Bifrost is not reachable.');
@@ -96,6 +104,13 @@ export default function App() {
     }, 1200);
     return () => window.clearTimeout(timer);
   }, [activeId, events.length, refreshRail]);
+
+  const refreshEngine = useCallback(async () => {
+    const [eng, hp] = await Promise.all([engineApi.get(), api.health()]);
+    setEngineInfo(eng);
+    setHealth(hp);
+    if (eng.configured && eng.process.running) setShowSetup(false);
+  }, []);
 
   const select = async (id: string) => {
     setBusy(true);
@@ -182,6 +197,10 @@ export default function App() {
       ? 'Pick or create a conversation first.'
       : undefined;
 
+  if (showSetup && engine) {
+    return <EngineSetup info={engine} onChanged={() => void refreshEngine()} />;
+  }
+
   return (
     <div className="app">
       <header className="topbar">
@@ -201,6 +220,9 @@ export default function App() {
         </div>
         <span className="topbar-right muted">
           {engineDown ? 'engine offline' : config ? `session ${config.sessionId}` : ''}
+          <button className="btn-ghost sm" onClick={() => setShowSetup(true)} title="Engine settings">
+            engine
+          </button>
         </span>
       </header>
 

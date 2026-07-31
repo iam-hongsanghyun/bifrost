@@ -43,11 +43,12 @@ app.add_middleware(
 )
 
 from .agent import router as _agent_router  # noqa: E402
-from .conversations import router as _conversations  # noqa: E402
 from .conversations.router import router as _conversations_router  # noqa: E402
+from .engine_router import router as _engine_router  # noqa: E402
 
 app.include_router(_agent_router.router)
 app.include_router(_conversations_router)
+app.include_router(_engine_router)
 
 
 @app.get("/api/events")
@@ -107,7 +108,14 @@ async def client_config() -> dict[str, object]:
     real Ragnarok UI and subscribes to its event stream directly — proxying either
     through Bifrost would add a hop and break SSE for no benefit.
     """
+    from . import engine
+
+    root = engine.load_root()
     return {
         "ragnarokBase": CONFIG.ragnarok_api_base,
         "sessionId": CONFIG.ragnarok_session_id,
+        # Whether the shell should open on setup instead of the chat. Sent with the
+        # boot config so the first paint is already correct — deciding it after a
+        # separate round trip would flash the chat and then replace it.
+        "engineConfigured": root is not None,
     }
