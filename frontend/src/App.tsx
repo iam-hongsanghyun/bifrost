@@ -18,6 +18,7 @@ import {
 import { ChatPane } from './components/ChatPane';
 import { ConversationRail } from './components/ConversationRail';
 import { EngineSetup } from './components/EngineSetup';
+import { isWorkingState } from './lib/toolLabels';
 
 type Tab = 'conversation' | 'ragnarok';
 
@@ -105,9 +106,11 @@ export default function App() {
         return;
       }
       if (kind === 'agent.status') {
-        // The service reports idle when a turn completes; nothing to append.
-        setBusy(Boolean((data as unknown as { state?: string }).state &&
-          (data as unknown as { state?: string }).state !== 'idle'));
+        // `isWorkingState` mirrors the server's own definition. Testing for
+        // `!== 'idle'` here left the composer disabled forever, because the last
+        // state published at the end of a turn is `done` — `idle` is only ever set
+        // internally, never sent.
+        setBusy(isWorkingState((data as unknown as { state?: string }).state));
         return;
       }
       setEvents((prev) => [...prev, data]);

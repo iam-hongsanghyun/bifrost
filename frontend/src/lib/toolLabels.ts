@@ -130,3 +130,19 @@ export function humanSummary(summary: string | undefined): string | null {
   if (text.length > 120 || text.includes('\n')) return null;
   return text;
 }
+
+/**
+ * Whether an agent state means "still working".
+ *
+ * Mirrors the server's own `Session.busy` exactly, because two definitions of busy
+ * is how the composer got stuck: the service publishes `done` and only then sets
+ * `state = "idle"` internally, without publishing it — so the last state a client
+ * ever sees is `done`, and a client testing `state !== 'idle'` waits forever.
+ *
+ * `awaiting_input` and `awaiting_approval` are handled the way the server does:
+ * awaiting_input is NOT busy, because the whole point is that the user must be able
+ * to answer.
+ */
+export function isWorkingState(state: string | undefined): boolean {
+  return state === 'thinking' || state === 'running_tool' || state === 'awaiting_approval';
+}
