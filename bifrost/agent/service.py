@@ -323,7 +323,10 @@ class AgentSession:
         options = args.get("options") if isinstance(args.get("options"), list) else []
         if not question_text:
             return "(ask_user needs a 'question')"
-        q = questions.create(self.conversation_id, question_text, options)
+        q = questions.create(
+            self.conversation_id, question_text, options,
+            needs_file=bool(args.get("needsFile")),
+        )
         self._publish("question.request", q.card())
         self._set_state("awaiting_input")
         answer = await questions.wait(q)
@@ -519,10 +522,13 @@ def _sdk_backend(session: AgentSession) -> AgentBackend:
     @tool(
         "ask_user",
         "Ask the USER to decide between concrete options at a major step "
-        "(run mode, snapshot window, scenario, carbon price, which dataset). "
-        "Returns their answer (an option or free text). Use BEFORE expensive "
-        "or study-shaping actions; never invent a preference the user could "
-        "state in one click.",
+        "(run mode, snapshot window, scenario, carbon price, which dataset), or "
+        "to HAND YOU DATA with needsFile — a wind or solar profile, a load trace, "
+        "a cost table. Returns their answer (an option, free text, or the stored "
+        "paths of files they uploaded, which you then read with read_attachment). "
+        "Use BEFORE expensive or study-shaping actions; never invent a preference "
+        "the user could state in one click, and never synthesise a time series "
+        "without offering to take theirs first.",
         {
             "type": "object",
             "properties": {
@@ -530,6 +536,14 @@ def _sdk_backend(session: AgentSession) -> AgentBackend:
                 "options": {
                     "type": "array", "items": {"type": "string"},
                     "description": "2-6 short, mutually exclusive choices (the user can also type their own).",
+                },
+                "needsFile": {
+                    "type": "boolean",
+                    "description": (
+                        "True when the answer is a FILE (CSV/Excel/JSON) rather than a "
+                        "choice — the card then shows an upload control. Still give "
+                        "`options` for the way out, e.g. 'Synthesise one instead'."
+                    ),
                 },
             },
             "required": ["question"],

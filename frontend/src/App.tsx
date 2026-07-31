@@ -13,11 +13,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   api, ChatEvent, ClientConfig, Conversation, ConversationGroup, EngineInfo, engineApi, Health,
-  subscribeChat, subscribeEngine,
+  subscribeChat, subscribeEngine, UploadedFile,
 } from './api';
 import { ChatPane } from './components/ChatPane';
 import { ConversationRail } from './components/ConversationRail';
 import { EngineSetup } from './components/EngineSetup';
+import { attachmentBlockFor } from './lib/attachments';
 import { isWorkingState } from './lib/toolLabels';
 
 type Tab = 'conversation' | 'ragnarok';
@@ -216,16 +217,33 @@ export default function App() {
     }
   };
 
-  const send = async (message: string) => {
+  /**
+   * Send a turn, with any files the user attached.
+   *
+   * The agent gets the stored PATHS appended (that is the only way it learns a
+   * file arrived — `read_attachment` takes a path); the transcript keeps the
+   * user's own words plus chips, so the paths do not clutter what they wrote.
+   */
+  const send = async (message: string, files: UploadedFile[] = []) => {
     if (!config || !activeId) return;
-    setEvents((prev) => [...prev, { kind: 'chat.message', role: 'user', markdown: message }]);
+    const forAgent = message + attachmentBlockFor(files);
+    setEvents((prev) => [
+      ...prev,
+      { kind: 'chat.message', role: 'user', markdown: message, files },
+    ]);
     setBusy(true);
     try {
-      await api.chat(message, activeId, config.sessionId);
+      await api.chat(forAgent, activeId, config.sessionId);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'The agent did not accept that message.');
       setBusy(false);
     }
+  };
+
+  const upload = async (files: File[]) => {
+    if (!config) throw new Error('Not connected yet.');
+    const stored = await api.uploadFiles(files, config.sessionId);
+    return stored.files;
   };
 
   const engineDown = health?.engine.reachable === false;
@@ -303,7 +321,8 @@ export default function App() {
             busy={busy}
             disabled={chatDisabled}
             disabledReason={chatDisabledReason}
-            onSend={(m) => void send(m)}
+            onSend={(m, files) => void send(m, files)}
+            onUpload={upload}
             onAnswerQuestion={(id, answer) => {
               // The agent is BLOCKED until this lands, so clear the working state
               // optimistically — leaving the composer disabled after answering

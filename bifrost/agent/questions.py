@@ -30,6 +30,10 @@ class Question:
     conversation_id: str
     question: str
     options: list[str]
+    #: The question asks for a FILE, not a choice — a wind or load profile, a cost
+    #: table. The card then offers an upload control, because the alternative is the
+    #: agent synthesising a time series and the user never being asked at all.
+    needs_file: bool = False
     future: "asyncio.Future[str]" = field(repr=False, default=None)  # type: ignore[assignment]
 
     def card(self) -> dict[str, Any]:
@@ -38,18 +42,26 @@ class Question:
             "conversationId": self.conversation_id,
             "question": self.question,
             "options": self.options,
+            "needsFile": self.needs_file,
         }
 
 
 _pending: dict[str, Question] = {}
 
 
-def create(conversation_id: str, question: str, options: list[str]) -> Question:
+def create(
+    conversation_id: str,
+    question: str,
+    options: list[str],
+    *,
+    needs_file: bool = False,
+) -> Question:
     q = Question(
         id=uuid.uuid4().hex[:12],
         conversation_id=conversation_id,
         question=question,
         options=[str(o) for o in options if str(o).strip()][:6],
+        needs_file=needs_file,
         future=asyncio.get_running_loop().create_future(),
     )
     _pending[q.id] = q

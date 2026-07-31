@@ -14,7 +14,8 @@
  * deserves to see that time went somewhere.
  */
 import { useEffect, useRef, useState } from 'react';
-import { ChatEvent } from '../api';
+import { ChatEvent, UploadedFile } from '../api';
+import { prettyBytes } from '../lib/attachments';
 import { describeTool, describeToolDone, humanSummary, isPlumbing } from '../lib/toolLabels';
 import { Markdown } from '../lib/markdown';
 import { Chart, ChartSpec } from './Chart';
@@ -26,10 +27,25 @@ interface Props {
   busy: boolean;
   disabled: boolean;
   disabledReason?: string;
-  onSend: (message: string) => void;
+  onSend: (message: string, files: UploadedFile[]) => void;
+  /** Store files and return their paths — the agent reads them by path. */
+  onUpload: (files: File[]) => Promise<UploadedFile[]>;
   /** The agent BLOCKS on these — an unanswerable question is a dead conversation. */
   onAnswerQuestion: (questionId: string, answer: string) => void;
   onDecideApproval: (approvalId: string, decision: 'allow' | 'deny') => void;
+}
+
+/** Chips for what the user handed over, on their own message and on a settled card. */
+function FileChips({ files }: { files: UploadedFile[] }) {
+  return (
+    <div className="files">
+      {files.map((f) => (
+        <span key={f.path} className="file-chip" title={f.path}>
+          {f.name} <em>{prettyBytes(f.size)}</em>
+        </span>
+      ))}
+    </div>
+  );
 }
 
 /** What the transcript renders: a message, a tool step, or folded plumbing. */
@@ -131,12 +147,38 @@ function toRows(events: ChatEvent[]): Row[] {
 }
 
 function QuestionCard(
-  { event, answered, onAnswer }:
-  { event: ChatEvent; answered: string | null; onAnswer: (id: string, answer: string) => void },
+  { event, answered, onAnswer, onUpload }:
+  {
+    event: ChatEvent; answered: string | null;
+    onAnswer: (id: string, answer: string) => void;
+    onUpload: (files: File[]) => Promise<UploadedFile[]>;
+  },
 ) {
   const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
+  const pickerRef = useRef<HTMLInputElement>(null);
   const id = event.questionId ?? '';
   const options = event.options ?? [];
+
+  // Answering WITH a file: store it, then answer with the paths, because the
+  // agent is blocked on this question and cannot go looking for an upload.
+  const answerWithFiles = async (picked: File[]) => {
+    if (picked.length === 0) return;
+    setBusy(true);
+    setFailed(null);
+    try {
+      const stored = await onUpload(picked);
+      const lines = stored.map((f) => `- ${f.name} → ${f.path} (${prettyBytes(f.size)})`);
+      onAnswer(id, `I uploaded the file(s) you asked for:\n${lines.join('\n')}`);
+    } catch (e) {
+      // Do NOT answer on failure — a wrong answer unblocks the agent with a path
+      // that is not there, and it would then invent the data instead.
+      setFailed(e instanceof Error ? e.message : 'Upload failed.');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   if (answered !== null) {
     return (
@@ -149,6 +191,25 @@ function QuestionCard(
   return (
     <div className="card">
       <p className="card-q">{event.question}</p>
+      {event.needsFile && (
+        <div className="card-file">
+          <input
+            ref={pickerRef}
+            type="file"
+            multiple
+            hidden
+            onChange={(e) => {
+              void answerWithFiles(Array.from(e.target.files ?? []));
+              e.target.value = '';  // so the same file can be picked twice
+            }}
+          />
+          <button className="btn-primary" disabled={busy} onClick={() => pickerRef.current?.click()}>
+            {busy ? 'Uploading…' : 'Choose a file…'}
+          </button>
+          <span className="muted">CSV, JSON or text. Or answer below instead.</span>
+          {failed && <span className="card-fail">{failed}</span>}
+        </div>
+      )}
       {options.length > 0 && (
         <div className="card-options">
           {options.map((option) => (
@@ -232,8 +293,27 @@ function ToolRow({ event }: { event: ChatEvent }) {
 export function ChatPane(props: Props) {
   const { events, streaming, busy, disabled, disabledReason } = props;
   const [draft, setDraft] = useState('');
+  const [pending, setPending] = useState<UploadedFile[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const pickerRef = useRef<HTMLInputElement>(null);
   const rows = toRows(events);
+
+  const take = async (picked: File[]) => {
+    if (picked.length === 0 || disabled) return;
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const stored = await props.onUpload(picked);
+      setPending((prev) => [...prev, ...stored]);
+    } catch (e) {
+      setUploadError(e instanceof Error ? e.message : 'Could not store that file.');
+    } finally {
+      setUploading(false);
+    }
+  };
 
   // Follow the tail as it streams. Both move, so both are dependencies —
   // otherwise the view sticks mid-answer.
@@ -243,13 +323,26 @@ export function ChatPane(props: Props) {
 
   const submit = () => {
     const message = draft.trim();
-    if (!message || busy || disabled) return;
+    // A bare attachment is a legitimate message — "here is the wind profile" with
+    // no words. Only an empty draft AND no files is nothing to send.
+    if ((!message && pending.length === 0) || busy || disabled) return;
     setDraft('');
-    props.onSend(message);
+    setPending([]);
+    setUploadError(null);
+    props.onSend(message, pending);
   };
 
   return (
-    <section className="chat">
+    <section
+      className={`chat${dragging ? ' is-dropping' : ''}`}
+      onDragOver={(e) => { e.preventDefault(); if (!disabled) setDragging(true); }}
+      onDragLeave={(e) => { e.preventDefault(); setDragging(false); }}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDragging(false);
+        void take(Array.from(e.dataTransfer.files ?? []));
+      }}
+    >
       <div className="chat-scroll">
         {rows.length === 0 && !streaming && (
           <div className="chat-empty">
@@ -257,7 +350,8 @@ export function ChatPane(props: Props) {
             <p className="muted">
               The agent drives Ragnarok — build a network, attach profiles, solve, compare.
               Switch to the <strong>Ragnarok</strong> tab at any point to see the model it is
-              working on.
+              working on. Drop a CSV in to hand over your own data — a wind profile, a load
+              trace, a cost table.
             </p>
           </div>
         )}
@@ -276,7 +370,8 @@ export function ChatPane(props: Props) {
           if (row.kind === 'question') {
             return (
               <QuestionCard key={row.key} event={row.event} answered={row.answered}
-                onAnswer={(id, answer) => void props.onAnswerQuestion(id, answer)} />
+                onAnswer={(id, answer) => void props.onAnswerQuestion(id, answer)}
+                onUpload={props.onUpload} />
             );
           }
           if (row.kind === 'approval') {
@@ -301,9 +396,11 @@ export function ChatPane(props: Props) {
           if (row.kind === 'tool') return <ToolRow key={row.key} event={row.event} />;
           const text = row.event.markdown ?? row.event.text ?? '';
           const mine = row.event.role === 'user';
+          const attached = row.event.files ?? [];
           return (
             <article key={row.key} className={`bubble${mine ? ' bubble--user' : ''}`}>
               {mine ? text : <Markdown text={text} />}
+              {attached.length > 0 && <FileChips files={attached} />}
             </article>
           );
         })}
@@ -313,6 +410,43 @@ export function ChatPane(props: Props) {
       </div>
 
       <footer className="composer">
+        {(pending.length > 0 || uploading || uploadError) && (
+          <div className="composer-files">
+            {pending.map((f) => (
+              <span key={f.path} className="file-chip" title={f.path}>
+                {f.name} <em>{prettyBytes(f.size)}</em>
+                <button
+                  className="file-drop"
+                  aria-label={`Remove ${f.name}`}
+                  onClick={() => setPending((prev) => prev.filter((p) => p.path !== f.path))}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+            {uploading && <span className="muted">Storing…</span>}
+            {uploadError && <span className="card-fail">{uploadError}</span>}
+          </div>
+        )}
+        <input
+          ref={pickerRef}
+          type="file"
+          multiple
+          hidden
+          onChange={(e) => {
+            void take(Array.from(e.target.files ?? []));
+            e.target.value = '';
+          }}
+        />
+        <button
+          className="btn-attach"
+          aria-label="Attach a data file"
+          title="Attach a data file — CSV, JSON or text"
+          disabled={disabled || uploading}
+          onClick={() => pickerRef.current?.click()}
+        >
+          +
+        </button>
         <textarea
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
@@ -327,7 +461,11 @@ export function ChatPane(props: Props) {
           disabled={disabled || busy}
           rows={3}
         />
-        <button className="btn-primary" onClick={submit} disabled={disabled || busy || !draft.trim()}>
+        <button
+          className="btn-primary"
+          onClick={submit}
+          disabled={disabled || busy || (!draft.trim() && pending.length === 0)}
+        >
           {busy ? 'Working…' : 'Send'}
         </button>
       </footer>

@@ -44,6 +44,10 @@ export interface ChatEvent {
   question?: string;
   options?: string[];
   answer?: string;
+  /** The question wants a FILE (a profile, a cost table), not a choice. */
+  needsFile?: boolean;
+  /** chat.attachments — what the user handed over, rendered as chips. */
+  files?: UploadedFile[];
   /** chart.show */
   chartId?: string;
   title?: string;
@@ -63,6 +67,14 @@ export interface ChatEvent {
   approvalId?: string;
   args?: Record<string, unknown>;
   decision?: string;
+}
+
+/** One stored attachment. `path` is what `read_attachment` takes. */
+export interface UploadedFile {
+  name: string;
+  storedAs: string;
+  path: string;
+  size: number;
 }
 
 export interface ClientConfig {
@@ -138,6 +150,23 @@ export const api = {
     }).then(json<Record<string, unknown>>),
 
   agentStatus: () => fetch('/api/agent/status').then(json<Record<string, unknown>>),
+
+  /**
+   * Hand files to the agent — a wind profile, a load trace, a cost table.
+   *
+   * The backend has stored uploads and offered `read_attachment` from the start;
+   * until now there was no way to reach it from the UI, so the agent had a tool
+   * for data the user could not give it. Multipart, no Content-Type header: the
+   * browser must set its own multipart boundary.
+   */
+  uploadFiles: (files: File[], sessionId: string) => {
+    const body = new FormData();
+    files.forEach((file) => body.append('files', file, file.name));
+    return fetch(`/api/agent/files?session_id=${encodeURIComponent(sessionId)}`, {
+      method: 'POST',
+      body,
+    }).then(json<{ files: UploadedFile[] }>);
+  },
 
   /** Answer a pending `ask_user`. Until this lands the agent is BLOCKED — it is
    *  awaiting input, so an unanswerable question is a dead conversation. */

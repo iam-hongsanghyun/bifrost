@@ -93,8 +93,32 @@ code { font-family: var(--mono); font-size: 0.9em; }
 .tool-name { font-family: var(--mono); color: var(--text); }
 .tool-summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.composer { display: flex; gap: 10px; padding: 12px 16px; border-top: 1px solid var(--border);
+.composer { display: flex; flex-wrap: wrap; gap: 10px; padding: 12px 16px;
+            border-top: 1px solid var(--border);
             background: var(--surface); align-items: flex-end; }
+/* Attachments sit above the input, on their own full-width line. */
+.composer-files { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+                  font-size: 12px; }
+.btn-attach { appearance: none; width: 32px; height: 32px; flex: none; font-size: 18px; line-height: 1;
+              color: var(--muted); background: var(--bg); border: 1px solid var(--border);
+              border-radius: var(--radius); cursor: pointer; }
+.btn-attach:hover:not(:disabled) { color: var(--brand);
+                                   border-color: color-mix(in srgb, var(--brand) 45%, var(--border)); }
+.btn-attach:disabled { opacity: 0.45; cursor: default; }
+/* A file the user handed over — named, sized, and traceable to a stored path. */
+.file-chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px;
+             font-size: 12px; border-radius: 999px; background: var(--bg);
+             border: 1px solid var(--border); }
+.file-chip em { font-style: normal; color: var(--muted); font-size: 11px; }
+.file-drop { appearance: none; background: none; border: none; padding: 0 0 0 2px; cursor: pointer;
+             color: var(--muted); font-size: 14px; line-height: 1; }
+.file-drop:hover { color: var(--danger); }
+.files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+/* Dropping a file anywhere over the transcript is the obvious gesture. */
+.chat.is-dropping { outline: 2px dashed color-mix(in srgb, var(--brand) 55%, var(--border));
+                    outline-offset: -6px; }
+.card-file { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 12px; }
+.card-fail { color: var(--danger); font-size: 12px; }
 .composer textarea { flex: 1; resize: vertical; font: inherit; color: inherit; padding: 9px 11px;
                      border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); }
 
