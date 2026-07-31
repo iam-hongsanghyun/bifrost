@@ -215,7 +215,12 @@ export default function App() {
             className={`tab${tab === 'ragnarok' ? ' is-active' : ''}`}
             onClick={() => setTab('ragnarok')}>
             Ragnarok
-            {engineVersion !== null && <span className="chip chip--muted">v{engineVersion}</span>}
+            {engineVersion !== null && (
+              <span className="chip chip--muted"
+                title="Ragnarok records every change to the model. This is how many it has recorded — it goes up whenever the agent (or you) change something.">
+                {engineVersion} {engineVersion === 1 ? 'change' : 'changes'}
+              </span>
+            )}
           </button>
         </div>
         <span className="topbar-right muted">
@@ -260,6 +265,17 @@ export default function App() {
             disabled={chatDisabled}
             disabledReason={chatDisabledReason}
             onSend={(m) => void send(m)}
+            onAnswerQuestion={(id, answer) => {
+              // The agent is BLOCKED until this lands, so clear the working state
+              // optimistically — leaving the composer disabled after answering
+              // reads as a hang.
+              void api.answerQuestion(id, answer).catch((e) =>
+                setError(e instanceof Error ? e.message : 'Could not send that answer.'));
+            }}
+            onDecideApproval={(id, decision) => {
+              void api.decideApproval(id, decision).catch((e) =>
+                setError(e instanceof Error ? e.message : 'Could not send that decision.'));
+            }}
           />
         </div>
 

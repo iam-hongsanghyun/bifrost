@@ -121,3 +121,30 @@ code { font-family: var(--mono); font-size: 0.9em; }
 .setup-foot { margin: 22px 0 0; font-size: 11px; font-family: var(--mono); }
 kbd { font-family: var(--mono); font-size: 0.9em; border: 1px solid var(--border);
       border-radius: 4px; padding: 0 4px; }
+
+/* ── Decision cards: the agent is BLOCKED until one is answered ──────────────
+   Given weight rather than styled as another transcript line — a question the
+   user scrolls past is a conversation that has silently stopped. */
+.card { align-self: stretch; max-width: 76ch; background: var(--surface);
+        border: 1px solid var(--brand); border-radius: var(--radius);
+        padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+.card--settled { border-color: var(--border); opacity: 0.75; }
+.card-q { margin: 0; font-weight: 600; }
+.card-a { margin: 0; font-size: 13px; color: var(--muted); }
+.card-options { display: flex; flex-wrap: wrap; gap: 6px; }
+.card-options .btn-ghost { border-color: var(--border); }
+.card-free { display: flex; gap: 8px; }
+.card-free input { flex: 1; font: inherit; padding: 7px 10px; color: inherit;
+                   border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); }
+.card-args { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 2px 10px;
+             font-size: 12px; font-family: var(--mono); }
+.card-args div { display: contents; }
+.card-args dt { color: var(--muted); }
+.card-args dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Tool rows: a state glyph, the sentence, then any extras. */
+.tool-icon { width: 12px; text-align: center; font-family: var(--mono); }
+.tool-what { color: var(--text); }
+.tool-row.is-plumbing { opacity: 0.6; }
+.tool-row.is-plumbing .tool-what { color: var(--muted); }
+.tool-row.is-done { border-left-color: var(--brand); }

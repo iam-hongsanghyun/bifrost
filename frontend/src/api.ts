@@ -39,6 +39,15 @@ export interface ChatEvent {
   resultSummary?: string;
   /** Ragnarok journal entries a tool produced — what it actually changed. */
   journalEntryIds?: number[];
+  /** question.request / question.resolved */
+  questionId?: string;
+  question?: string;
+  options?: string[];
+  answer?: string;
+  /** approval.request / approval.resolved */
+  approvalId?: string;
+  args?: Record<string, unknown>;
+  decision?: string;
 }
 
 export interface ClientConfig {
@@ -112,6 +121,21 @@ export const api = {
     }).then(json<Record<string, unknown>>),
 
   agentStatus: () => fetch('/api/agent/status').then(json<Record<string, unknown>>),
+
+  /** Answer a pending `ask_user`. Until this lands the agent is BLOCKED — it is
+   *  awaiting input, so an unanswerable question is a dead conversation. */
+  answerQuestion: (questionId: string, answer: string) =>
+    fetch(`/api/agent/questions/${questionId}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ answer }),
+    }).then(json<Record<string, unknown>>),
+
+  /** Allow or deny a tool call that needs approval. Same deal: it is waiting. */
+  decideApproval: (approvalId: string, decision: 'allow' | 'deny') =>
+    fetch(`/api/agent/approvals/${approvalId}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ decision }),
+    }).then(json<Record<string, unknown>>),
 };
 
 /** Subscribe to Bifrost's conversation stream. Returns an unsubscribe. */
