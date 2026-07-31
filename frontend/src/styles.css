@@ -73,11 +73,18 @@ code { font-family: var(--mono); font-size: 0.9em; }
 .chat-scroll { flex: 1; overflow: auto; padding: 20px 22px; display: flex; flex-direction: column; gap: 10px; }
 .chat-empty { max-width: 46ch; margin: 8vh auto 0; text-align: center; }
 .chat-empty h2 { margin: 0 0 6px; font-size: 18px; }
-.bubble { align-self: flex-start; max-width: 76ch; background: var(--surface);
-          border: 1px solid var(--border); border-radius: var(--radius); padding: 9px 13px;
+/* The agent's replies are the content, not a widget. A border and a fill around a
+   long analysis reads as an input box — and the reply is often a table or several
+   paragraphs, which a bubble makes narrower and harder to scan for no gain. Only the
+   USER's messages are bubbled, which is what makes turn-taking legible. */
+.bubble { align-self: stretch; max-width: 76ch; padding: 2px 0;
           white-space: pre-wrap; word-break: break-word; }
-.bubble--user { align-self: flex-end; background: color-mix(in srgb, var(--brand) 10%, var(--surface)); }
-.bubble--streaming { border-style: dashed; }
+.bubble--user { align-self: flex-end; max-width: 62ch; background: color-mix(in srgb, var(--brand) 10%, var(--surface));
+                border: 1px solid color-mix(in srgb, var(--brand) 25%, var(--border));
+                border-radius: var(--radius); padding: 9px 13px; }
+/* Still-streaming text: a quiet left rule rather than a dashed box, so the reply
+   does not change shape the moment it finishes. */
+.bubble--streaming { border-left: 2px solid var(--border); padding-left: 10px; }
 
 .tool-row { display: flex; align-items: center; gap: 9px; font-size: 12px; color: var(--muted);
             padding: 4px 10px; border-left: 2px solid var(--border); }
