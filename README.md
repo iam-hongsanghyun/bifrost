@@ -97,7 +97,7 @@ By hand:
 
 ```bash
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python -m uvicorn bifrost.main:app --port 8100 --reload
+.venv/bin/python -m uvicorn bifrost.main:app --port 8770 --reload
 cd frontend && npm install && npm run dev
 ```
 
@@ -153,6 +153,11 @@ Copy `.env.example`. The two that matter:
 - `RAGNAROK_SESSION_ID` — the session the agent and the embedded UI **both** act on.
   They must match, or the user watches a different model than the agent edits.
 
+Bifrost serves its API on **8770** and its interface on **8771** — chosen to collide
+with nothing: not Vite's 5173, not Ragnarok's 8000, and outside the usual dev
+defaults. Override with `BIFROST_API_PORT` / `BIFROST_UI_PORT`; the Vite proxy target
+is derived from the first, so both halves move together.
+
 ## Status
 
 Working and tested: the conversation store, the project-package binding, the Ragnarok
@@ -166,7 +171,7 @@ composer, and both event streams — Bifrost's for the chat and Ragnarok's
 
 **Known broken: the Ragnarok tab renders blank.** Not a layout bug — the iframe is
 present, sized and visible, and its `GET /` returns 200; Ragnarok is fine opened
-directly. The cause is that the UI on `localhost:5173` embedding the engine on
+directly. The cause is that the UI on `localhost:8771` embedding the engine on
 `127.0.0.1:8000` is a *different origin*, so the frame gets partitioned storage and
 Ragnarok's boot, which reads `localStorage`, dies inside it.
 

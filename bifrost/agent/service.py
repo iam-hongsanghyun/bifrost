@@ -37,6 +37,7 @@ from . import approvals, auth, policy, prompts, questions, transcript
 
 logger = logging.getLogger("pypsa_gui.agent")
 
+from .. import engine
 from ..config import CONFIG
 
 _REPO_ROOT = CONFIG.repo_root
@@ -541,17 +542,41 @@ def _sdk_backend(session: AgentSession) -> AgentBackend:
     }
     workdir = CONFIG.agent_dir / "workdir"
     workdir.mkdir(parents=True, exist_ok=True)
+
+    # Ragnarok's MCP server is the agent's ENTIRE modelling toolset, and it lives in
+    # the engine checkout — not here. It must therefore be launched with the
+    # checkout's own interpreter (Bifrost's has no PyPSA) and with the checkout on
+    # PYTHONPATH so `-m backend.mcp` resolves; the agent's own cwd is its file
+    # sandbox and must not be repointed at the engine to achieve that.
+    #
+    # This used to be `sys.executable` + `-m backend.mcp` from Bifrost's workdir,
+    # inherited from when the agent ran INSIDE Ragnarok. Once Bifrost became a
+    # separate app with its package renamed to `bifrost/`, there was no `backend`
+    # package to import: the server failed to start, every `mcp__ragnarok__*` tool
+    # was silently absent, and the agent could only report that it had no way to
+    # touch a model.
+    mcp_servers: dict[str, Any] = {"bifrost": bifrost_server}
+    engine_root = engine.load_root()
+    engine_python = engine.find_interpreter(engine_root) if engine_root else None
+    if engine_root is not None and engine_python is not None:
+        mcp_servers["ragnarok"] = {
+            "type": "stdio",
+            "command": engine_python,
+            "args": ["-m", "backend.mcp"],
+            "env": {**mcp_env, "PYTHONPATH": str(engine_root)},
+        }
+    else:
+        # Omitted rather than configured broken. A server that cannot start yields
+        # no tools and no error the user can see; leaving it out lets
+        # /api/agent/status say what is missing.
+        logger.warning(
+            "Ragnarok MCP server not configured — engine root %s, interpreter %s. "
+            "The agent will have no modelling tools.", engine_root, engine_python,
+        )
+
     options = ClaudeAgentOptions(
         system_prompt=prompts.SYSTEM_PROMPT,
-        mcp_servers={
-            "ragnarok": {
-                "type": "stdio",
-                "command": sys.executable,
-                "args": ["-m", "backend.mcp"],
-                "env": mcp_env,
-            },
-            "bifrost": bifrost_server,
-        },
+        mcp_servers=mcp_servers,
         # Builtin tools are denied in can_use_tool too; this keeps the model
         # from even trying the heavy ones.
         disallowed_tools=["Bash", "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch", "Task"],

@@ -14,8 +14,14 @@ cd "$ROOT_DIR"
 
 VENV_DIR=".venv"
 REQ_HASH_FILE="$VENV_DIR/.req_hash"
-API_PORT="${BIFROST_API_PORT:-8100}"
-UI_PORT="${BIFROST_UI_PORT:-5173}"
+# Bifrost's own ports. Not 5173 (any other Vite project) and not 8000-something
+# (Ragnarok itself) — an adjacent pair outside the common dev defaults.
+API_PORT="${BIFROST_API_PORT:-8770}"
+UI_PORT="${BIFROST_UI_PORT:-8771}"
+# Exported so vite.config.ts derives its proxy target from the SAME value the API is
+# started with; a literal there would break the UI whenever these are overridden.
+export BIFROST_API_PORT="$API_PORT"
+export BIFROST_UI_PORT="$UI_PORT"
 
 # ── Failure reporting ─────────────────────────────────────────────────────────
 # A double-clicked script whose window vanishes on error tells the user nothing,
@@ -120,7 +126,7 @@ if ! curl -fsS "http://127.0.0.1:$API_PORT/api/health" >/dev/null 2>&1; then
 fi
 
 echo "Starting the interface on http://localhost:$UI_PORT …"
-( cd frontend && npm run dev -- --port "$UI_PORT" --strictPort ) \
+( cd frontend && npm run dev ) \
   >> backend/data/logs/bifrost-ui.log 2>&1 &
 UI_PID=$!
 

@@ -4,20 +4,41 @@
     {
       "name": "ragnarok",
       "runtimeExecutable": "/Users/sanghyun/github/ragnarok/.venv-pypsa/bin/python",
-      "runtimeArgs": ["-m", "uvicorn", "backend.app.main:app", "--host", "127.0.0.1", "--port", "8000"],
+      "runtimeArgs": [
+        "-m",
+        "uvicorn",
+        "backend.app.main:app",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8000"
+      ],
       "port": 8000
     },
     {
       "name": "bifrost-api",
       "runtimeExecutable": "/Users/sanghyun/github/ragnarok/.venv-pypsa/bin/python",
-      "runtimeArgs": ["-m", "uvicorn", "bifrost.main:app", "--host", "127.0.0.1", "--port", "8100"],
-      "port": 8100
+      "runtimeArgs": [
+        "-m",
+        "uvicorn",
+        "bifrost.main:app",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8770"
+      ],
+      "port": 8770
     },
     {
       "name": "bifrost",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--prefix", "frontend"],
-      "port": 5173
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "frontend"
+      ],
+      "port": 8771
     }
   ]
 }
