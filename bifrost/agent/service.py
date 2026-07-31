@@ -185,6 +185,7 @@ class AgentSession:
             "chat.message", "tool.start", "tool.end", "agent.status",
             "approval.request", "approval.resolved",
             "question.request", "question.resolved",
+            "chart.show",
         ):
             transcript.append(self.session_id, self.conversation_id, event, data)
 
@@ -272,6 +273,44 @@ class AgentSession:
         )
 
     # ── ask_user (in-process bifrost tool) ──────────────────────────────────
+
+    def _handle_show_chart(self, args: dict[str, Any]) -> str:
+        """Publish a chart for the transcript to draw.
+
+        Series are truncated to the x axis and to a sane point count. An 8,760-point
+        line through an SSE frame and into a browser is a slow way to show a shape
+        the eye reads at a few hundred points, and a mismatched x/y length renders as
+        a silently wrong chart rather than an error.
+        """
+        MAX_POINTS = 2000
+        x = [str(v) for v in (args.get("x") or [])][:MAX_POINTS]
+        series: list[dict[str, Any]] = []
+        for raw in args.get("series") or []:
+            if not isinstance(raw, dict):
+                continue
+            values = [
+                float(v) for v in (raw.get("values") or [])
+                if isinstance(v, (int, float))
+            ][: len(x)]
+            if not values:
+                continue
+            series.append({"name": str(raw.get("name") or "series"), "values": values})
+        if not x or not series:
+            return "Not drawn: a chart needs an x axis and at least one series with numbers."
+        payload = {
+            "conversationId": self.conversation_id,
+            "chartId": uuid.uuid4().hex[:12],
+            "title": str(args.get("title") or ""),
+            # `chartKind`, not `kind`: the event envelope already uses `kind` for
+            # the event name, and overloading it made the chart type unreadable.
+            "chartKind": str(args.get("kind") or "line"),
+            "unit": str(args.get("unit") or ""),
+            "note": str(args.get("note") or ""),
+            "x": x,
+            "series": series,
+        }
+        self._publish("chart.show", payload)
+        return f"Drawn: {payload['title']} ({len(series)} series, {len(x)} points)."
 
     async def _handle_ask_user(self, args: dict[str, Any]) -> str:
         """Hand a decision to the user: publish an option card, await the answer.
@@ -501,6 +540,51 @@ def _sdk_backend(session: AgentSession) -> AgentBackend:
         return {"content": [{"type": "text", "text": answer}]}
 
     @tool(
+        "show_chart",
+        "Draw a chart in the conversation. Use it for any result the user should SEE "
+        "rather than read as a table — a dispatch or price series over snapshots, a "
+        "carrier mix, a cost or emissions breakdown, a comparison across scenarios. "
+        "Pass data you already fetched; do not re-fetch to chart it. One chart per "
+        "point you are making, with the sentence that interprets it — a chart with no "
+        "claim attached is decoration.",
+        {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "What the chart shows, in a few words."},
+                "kind": {
+                    "type": "string", "enum": ["line", "area", "bar"],
+                    "description": "line/area for anything over snapshots or time; bar for categories.",
+                },
+                "x": {
+                    "type": "array", "items": {"type": "string"},
+                    "description": "Axis labels — snapshots for a series, category names for a bar.",
+                },
+                "series": {
+                    "type": "array",
+                    "description": "One entry per line/bar group.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "values": {"type": "array", "items": {"type": "number"}},
+                        },
+                        "required": ["name", "values"],
+                    },
+                },
+                "unit": {"type": "string", "description": "MW, MWh, $/MWh, tCO2 … shown on the axis."},
+                "note": {"type": "string", "description": "Optional caveat shown under the chart."},
+            },
+            "required": ["title", "kind", "x", "series"],
+        },
+    )
+    async def show_chart(args: dict[str, Any]) -> dict[str, Any]:
+        # Published, not returned as data: the chart is for the USER, and echoing the
+        # numbers back into the model's context would spend tokens re-reading what it
+        # just sent. The confirmation is deliberately terse for the same reason.
+        drawn = session._handle_show_chart(args)
+        return {"content": [{"type": "text", "text": drawn}]}
+
+    @tool(
         "read_attachment",
         "Read a text window of a file the user attached to this conversation "
         "(they drop files into the chat; each attachment message lists stored "
@@ -528,7 +612,7 @@ def _sdk_backend(session: AgentSession) -> AgentBackend:
         return {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}]}
 
     bifrost_server = create_sdk_mcp_server(
-        name="bifrost", version="1.0.0", tools=[ask_user, read_attachment]
+        name="bifrost", version="1.0.0", tools=[ask_user, show_chart, read_attachment]
     )
 
     agent_auth = auth.resolve()

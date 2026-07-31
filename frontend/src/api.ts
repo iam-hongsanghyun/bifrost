@@ -44,6 +44,14 @@ export interface ChatEvent {
   question?: string;
   options?: string[];
   answer?: string;
+  /** chart.show */
+  chartId?: string;
+  title?: string;
+  chartKind?: string;
+  x?: string[];
+  series?: { name: string; values: number[] }[];
+  unit?: string;
+  note?: string;
   /** approval.request / approval.resolved */
   approvalId?: string;
   args?: Record<string, unknown>;
@@ -150,6 +158,7 @@ export function subscribeChat(
     'agent.status', 'chat.delta', 'chat.message',
     'tool.start', 'tool.end',
     'approval.request', 'approval.resolved',
+    'chart.show',
     'question.request', 'question.resolved',
   ];
   const handlers = kinds.map((kind) => {

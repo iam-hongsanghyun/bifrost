@@ -16,6 +16,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { ChatEvent } from '../api';
 import { describeTool, describeToolDone, humanSummary, isPlumbing } from '../lib/toolLabels';
+import { Markdown } from '../lib/markdown';
+import { Chart, ChartSpec } from './Chart';
 
 interface Props {
   events: ChatEvent[];
@@ -36,7 +38,8 @@ type Row =
   | { kind: 'tool'; event: ChatEvent; key: string }
   | { kind: 'plumbing'; count: number; key: string }
   | { kind: 'question'; event: ChatEvent; answered: string | null; key: string }
-  | { kind: 'approval'; event: ChatEvent; decided: string | null; key: string };
+  | { kind: 'approval'; event: ChatEvent; decided: string | null; key: string }
+  | { kind: 'chart'; spec: ChartSpec; key: string };
 
 /**
  * Collapse the event stream into rows.
@@ -70,6 +73,21 @@ function toRows(events: ChatEvent[]): Row[] {
       rows.push({
         kind: 'approval', event, key: `a-${event.approvalId}`,
         decided: decided.get(event.approvalId) ?? null,
+      });
+      return;
+    }
+    if (event.kind === 'chart.show' && event.x && event.series) {
+      rows.push({
+        kind: 'chart', key: `chart-${event.chartId ?? index}`,
+        spec: {
+          chartId: event.chartId,
+          title: event.title,
+          kind: event.chartKind,
+          unit: event.unit,
+          note: event.note,
+          x: event.x,
+          series: event.series,
+        },
       });
       return;
     }
@@ -262,12 +280,13 @@ export function ChatPane(props: Props) {
                 onDecide={(id, d) => void props.onDecideApproval(id, d)} />
             );
           }
+          if (row.kind === 'chart') return <Chart key={row.key} spec={row.spec} />;
           if (row.kind === 'tool') return <ToolRow key={row.key} event={row.event} />;
           const text = row.event.markdown ?? row.event.text ?? '';
           const mine = row.event.role === 'user';
           return (
             <article key={row.key} className={`bubble${mine ? ' bubble--user' : ''}`}>
-              {text}
+              {mine ? text : <Markdown text={text} />}
             </article>
           );
         })}
