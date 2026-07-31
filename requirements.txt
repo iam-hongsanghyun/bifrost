@@ -1,0 +1,5 @@
+fastapi>=0.115
+uvicorn[standard]>=0.30
+python-multipart>=0.0.9   # file uploads: project-package import, chat attachments
+httpx>=0.27               # the only route to Ragnarok
+pydantic>=2.7

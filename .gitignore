@@ -1,0 +1,18 @@
+__pycache__/
+*.pyc
+.venv*/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Conversation store: transcripts and project packages are the user's data.
+backend/data/
+
+# Secrets (the Anthropic key lives here, 0600).
+backend/secrets.json
+.env
+
+node_modules/
+frontend/build/
+.DS_Store
+*.log

@@ -1,0 +1,4 @@
+# Optional, like Ragnarok's requirements-mcp.txt: the agent router always mounts
+# and GET /api/agent/status reports a degraded state when this is absent, so the
+# app runs (and the Ragnarok tab works) without an SDK install.
+claude-agent-sdk>=0.1
