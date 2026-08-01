@@ -52,6 +52,15 @@ _MODEL_CHOICE_DEFAULTS = "claude-opus-4-8,claude-sonnet-5,claude-haiku-4-5"
 RESTORED_CONTEXT_MAX_CHARS = int(os.environ.get("RAGNAROK_AGENT_RESTORE_MAX_CHARS", "20000"))
 
 
+#: Reasoning effort levels the picker offers, cheapest first. The SDK takes these
+#: verbatim; "high" is the default because a wrong power-system answer costs far
+#: more than the tokens saved by guessing quickly.
+EFFORT_CHOICES = ("low", "medium", "high")
+DEFAULT_EFFORT = os.environ.get("RAGNAROK_AGENT_EFFORT", "high").strip().lower()
+if DEFAULT_EFFORT not in EFFORT_CHOICES:
+    DEFAULT_EFFORT = "high"
+
+
 def model_choices() -> list[str]:
     """Model ids offered in the model picker (RAGNAROK_AGENT_MODELS overrides)."""
     raw = os.environ.get("RAGNAROK_AGENT_MODELS", _MODEL_CHOICE_DEFAULTS)
@@ -155,6 +164,10 @@ class AgentSession:
         self.conversation_id = uuid.uuid4().hex[:12]
         self.autonomy: str = "guided"
         self.model: str | None = DEFAULT_MODEL
+        #: Reasoning effort for the next turns. A modelling question is often
+        #: cheap to answer and expensive to get wrong, so this is the user's
+        #: dial rather than ours.
+        self.effort: str = DEFAULT_EFFORT
         self.state: str = "idle"
         self.cost_usd: float = 0.0
         self.turns: int = 0
@@ -174,6 +187,7 @@ class AgentSession:
         transcript.write_state(self.session_id, {
             "conversationId": self.conversation_id,
             "model": self.model,
+            "effort": self.effort,
             "autonomy": self.autonomy,
         })
 
@@ -185,7 +199,7 @@ class AgentSession:
             "chat.message", "tool.start", "tool.end", "agent.status",
             "approval.request", "approval.resolved",
             "question.request", "question.resolved",
-            "chart.show", "assumption.recorded",
+            "chart.show", "assumption.recorded", "show.request",
         ):
             transcript.append(self.session_id, self.conversation_id, event, data)
 
@@ -484,6 +498,25 @@ class AgentSession:
         await self._dispose_backend()
         self._persist_state()
 
+    async def set_effort(self, effort: str) -> None:
+        """Select reasoning effort for this session's next turns.
+
+        Same mechanics as :meth:`set_model` — baked in at connect time, so the
+        live backend is disposed and the next turn reconnects with the transcript
+        replayed. Rejects unknown levels rather than passing them to the SDK,
+        where a typo would surface as an opaque connect failure mid-turn.
+        """
+        level = (effort or "").strip().lower()
+        if level not in EFFORT_CHOICES:
+            raise ValueError(f"effort must be one of {', '.join(EFFORT_CHOICES)}")
+        if level == self.effort:
+            return
+        if self.busy:
+            raise RuntimeError("agent_busy")
+        self.effort = level
+        await self._dispose_backend()
+        self._persist_state()
+
     async def interrupt(self) -> None:
         """Stop the current turn NOW.
 
@@ -674,6 +707,52 @@ def _sdk_backend(session: AgentSession) -> AgentBackend:
         return {"content": [{"type": "text", "text": drawn}]}
 
     @tool(
+        "show_in_ragnarok",
+        "Point the user at a view in the Ragnarok tab — the map, the topology, a "
+        "table, the results — instead of describing where to look. Emits a 'Show "
+        "me' link in the conversation; clicking it switches tab and highlights "
+        "what you named. Use it whenever your answer is about something SPATIAL or "
+        "visual (a congested corridor, an isolated bus, where the new capacity "
+        "landed), and after a solve so the user can confirm the result in the app "
+        "they already know. It navigates only — it changes nothing.",
+        {
+            "type": "object",
+            "properties": {
+                "tab": {
+                    "type": "string",
+                    "enum": ["Model", "Build", "Data", "Forge", "Market", "PostAnalysis",
+                             "Analytics", "PhysicalRisk", "Siting", "History", "Settings"],
+                    "description": "Model = network map/table; PostAnalysis/Analytics = results.",
+                },
+                "select": {
+                    "type": "string",
+                    "description": "What to highlight there — a bus, line or generator NAME.",
+                },
+                "view": {
+                    "type": "string", "enum": ["Map", "Table"],
+                    "description": "Sub-view on the Model tab.",
+                },
+                "why": {
+                    "type": "string",
+                    "description": "One line: what the user should notice. Shown on the link.",
+                },
+            },
+            "required": ["tab"],
+        },
+    )
+    async def show_in_ragnarok(args: dict[str, Any]) -> dict[str, Any]:
+        payload = {
+            "conversationId": session.conversation_id,
+            "tab": str(args.get("tab") or "Model"),
+            "select": str(args.get("select") or ""),
+            "view": str(args.get("view") or ""),
+            "why": str(args.get("why") or ""),
+        }
+        session._publish("show.request", payload)
+        target = payload["select"] or payload["tab"]
+        return {"content": [{"type": "text", "text": f"Offered the user a link to {target}."}]}
+
+    @tool(
         "read_attachment",
         "Read a text window of a file the user attached to this conversation "
         "(they drop files into the chat; each attachment message lists stored "
@@ -693,7 +772,7 @@ def _sdk_backend(session: AgentSession) -> AgentBackend:
         from . import attachments
 
         result = attachments.read_preview(
-            session.session_id,
+            session.conversation_id,
             str(args.get("path") or ""),
             offset=int(args.get("offset") or 0),
             limit=int(args.get("limit") or 200),
@@ -701,7 +780,7 @@ def _sdk_backend(session: AgentSession) -> AgentBackend:
         return {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}]}
 
     bifrost_server = create_sdk_mcp_server(
-        name="bifrost", version="1.0.0", tools=[ask_user, record_assumption, show_chart, read_attachment]
+        name="bifrost", version="1.0.0", tools=[ask_user, record_assumption, show_chart, show_in_ragnarok, read_attachment]
     )
 
     agent_auth = auth.resolve()
@@ -747,7 +826,22 @@ def _sdk_backend(session: AgentSession) -> AgentBackend:
             "The agent will have no modelling tools.", engine_root, engine_python,
         )
 
+    # `effort` only exists on newer SDKs. Feature-detect rather than pass blindly:
+    # an unknown kwarg is a TypeError at connect time, which would surface to the
+    # user as a dead chat box rather than "your SDK is old".
+    import dataclasses as _dc
+
+    extra: dict[str, Any] = {}
+    if "effort" in {f.name for f in _dc.fields(ClaudeAgentOptions)}:
+        extra["effort"] = session.effort
+    else:
+        logger.warning(
+            "claude_agent_sdk has no `effort` option; the effort picker will not "
+            "take effect until the SDK is upgraded."
+        )
+
     options = ClaudeAgentOptions(
+        **extra,
         system_prompt=prompts.SYSTEM_PROMPT,
         mcp_servers=mcp_servers,
         # Builtin tools are denied in can_use_tool too; this keeps the model
@@ -774,6 +868,9 @@ def _restore_prefs(session: AgentSession, state: dict[str, Any]) -> None:
     model = state.get("model")
     if isinstance(model, str) and model.strip():
         session.model = model.strip()
+    effort = state.get("effort")
+    if isinstance(effort, str) and effort.strip().lower() in EFFORT_CHOICES:
+        session.effort = effort.strip().lower()
     autonomy = state.get("autonomy")
     if isinstance(autonomy, str) and autonomy:
         session.autonomy = policy.normalize_autonomy(autonomy)
@@ -827,6 +924,17 @@ def peek_conversation_id(session_id: str) -> str | None:
         return conversation_id
     conversations = transcript.list_conversations(session_id)
     return conversations[0]["conversationId"] if conversations else None
+
+
+def peek_effort(session_id: str) -> str:
+    """Selected effort without creating a session (live → persisted → default)."""
+    session = _sessions.get(session_id)
+    if session is not None:
+        return session.effort
+    effort = transcript.read_state(session_id).get("effort")
+    if isinstance(effort, str) and effort.strip().lower() in EFFORT_CHOICES:
+        return effort.strip().lower()
+    return DEFAULT_EFFORT
 
 
 def peek_model(session_id: str) -> str | None:

@@ -205,3 +205,31 @@ def test_an_unknown_basis_falls_back_to_assumed(
     monkeypatch.setattr(assumptions, "STORE", local)
     c = local.create()
     assert assumptions.record(c.id, subject="x", value="1", basis="vibes")["basis"] == "assumed"
+
+
+def test_attachments_live_with_the_conversation_that_needs_them(tmp_path, monkeypatch):
+    """A handed-over wind profile is part of the study, so it is stored with it.
+
+    Uploads were keyed by SESSION, which put every conversation's files in one
+    shared folder outside the thing that gets saved, moved or re-imported. The
+    transcript would still cite the path, so a conversation re-opened elsewhere
+    pointed at a file that was not there — and the agent's documented fallback for
+    a missing profile is to synthesise one.
+    """
+    import io
+
+    from bifrost.agent import attachments
+    from bifrost.config import CONFIG
+
+    monkeypatch.delenv("RAGNAROK_AGENT_UPLOAD_DIR", raising=False)
+    saved = attachments.save("conv-abc", "wind.csv", io.BytesIO(b"snapshot,cf\n2030,0.4\n"))
+
+    stored = Path(saved["path"])
+    assert stored.exists()
+    # Inside THIS conversation's directory, not a shared session folder.
+    assert stored.parent.parent == CONFIG.conversations_dir / "conv-abc"
+
+    # Readable by the conversation that owns it...
+    assert attachments.read_preview("conv-abc", saved["path"])["totalLines"] == 2
+    # ...and not by any other, even given the full path.
+    assert "no attachment" in attachments.read_preview("conv-xyz", saved["path"])["error"]

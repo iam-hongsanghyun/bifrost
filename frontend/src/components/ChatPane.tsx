@@ -33,6 +33,8 @@ interface Props {
   /** The agent BLOCKS on these — an unanswerable question is a dead conversation. */
   onAnswerQuestion: (questionId: string, answer: string) => void;
   onDecideApproval: (approvalId: string, decision: 'allow' | 'deny') => void;
+  /** Switch to the Ragnarok tab and point it at what the agent named. */
+  onShowInRagnarok: (event: ChatEvent) => void;
 }
 
 /** Chips for what the user handed over, on their own message and on a settled card. */
@@ -56,7 +58,8 @@ type Row =
   | { kind: 'question'; event: ChatEvent; answered: string | null; key: string }
   | { kind: 'approval'; event: ChatEvent; decided: string | null; key: string }
   | { kind: 'chart'; spec: ChartSpec; key: string }
-  | { kind: 'assumption'; event: ChatEvent; key: string };
+  | { kind: 'assumption'; event: ChatEvent; key: string }
+  | { kind: 'show'; event: ChatEvent; key: string };
 
 /**
  * Collapse the event stream into rows.
@@ -108,6 +111,10 @@ function toRows(events: ChatEvent[]): Row[] {
           series: event.series,
         },
       });
+      return;
+    }
+    if (event.kind === 'show.request') {
+      rows.push({ kind: 'show', event, key: `show-${index}` });
       return;
     }
     if (event.kind === 'assumption.recorded') {
@@ -392,6 +399,24 @@ export function ChatPane(props: Props) {
                   {a.source && <em> — {a.source}</em>}
                 </span>
               </div>
+            );
+          }
+          if (row.kind === 'show') {
+            const e = row.event;
+            const what = e.select || e.tab || 'the model';
+            return (
+              <button
+                key={row.key}
+                className="show-row"
+                onClick={() => props.onShowInRagnarok(e)}
+                title={`Switch to the Ragnarok ${e.tab} tab${e.select ? ` and highlight ${e.select}` : ''}`}
+              >
+                <span className="show-icon" aria-hidden>→</span>
+                <span>
+                  Show me <strong>{what}</strong>
+                  {e.why && <em> — {e.why}</em>}
+                </span>
+              </button>
             );
           }
           if (row.kind === 'chart') return <Chart key={row.key} spec={row.spec} />;

@@ -67,6 +67,11 @@ export interface ChatEvent {
   basis?: string;
   source?: string;
   affects?: string;
+  /** show.request — the agent pointing at a Ragnarok view */
+  tab?: string;
+  select?: string;
+  view?: string;
+  why?: string;
   /** approval.request / approval.resolved */
   approvalId?: string;
   args?: Record<string, unknown>;
@@ -88,14 +93,54 @@ export interface ClientConfig {
   engineConfigured: boolean;
 }
 
+/** What the agent is, and what it is doing right now. */
+export interface AgentStatus {
+  available: boolean;
+  auth: string;
+  state: string;
+  autonomy: string;
+  model: string | null;
+  models: string[];
+  effort: string;
+  efforts: string[];
+  costUsd: number;
+}
+
 export interface Health {
   ok: boolean;
   sessionId: string;
   engine: { reachable: boolean; base: string; error?: string };
 }
 
+/**
+ * Unwrap a response, and unwrap its ERROR too.
+ *
+ * This used to throw the raw body, so a FastAPI failure reached the user as
+ * `{"detail":"agent_busy: another conversation is running."}` — JSON in a banner,
+ * which tells them nothing about what to do. FastAPI puts the human sentence in
+ * `detail`; take it. Falls back to the raw text, then to the status code, because
+ * an unparseable error still has to say something.
+ */
 async function json<T>(resp: Response): Promise<T> {
-  if (!resp.ok) throw new Error((await resp.text()) || `HTTP ${resp.status}`);
+  if (!resp.ok) {
+    const raw = await resp.text();
+    let message = raw;
+    try {
+      const body = JSON.parse(raw) as { detail?: unknown };
+      if (typeof body.detail === 'string' && body.detail.trim()) {
+        message = body.detail;
+      } else if (Array.isArray(body.detail)) {
+        // Pydantic validation errors: [{loc, msg, type}, …]
+        message = body.detail
+          .map((d) => (d as { msg?: string }).msg)
+          .filter(Boolean)
+          .join('; ');
+      }
+    } catch {
+      /* not JSON — keep the raw text */
+    }
+    throw new Error(message.trim() || `HTTP ${resp.status}`);
+  }
   return (await resp.json()) as T;
 }
 
@@ -153,7 +198,29 @@ export const api = {
       body: JSON.stringify({ message, conversationId, sessionId }),
     }).then(json<Record<string, unknown>>),
 
-  agentStatus: () => fetch('/api/agent/status').then(json<Record<string, unknown>>),
+  agentStatus: (sessionId: string) =>
+    fetch(`/api/agent/status?session_id=${encodeURIComponent(sessionId)}`).then(json<AgentStatus>),
+
+  /** Which model runs the next turn. Takes effect at the start of a turn. */
+  setModel: (model: string, sessionId: string) =>
+    fetch('/api/agent/model', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, sessionId }),
+    }).then(json<{ model: string | null; models: string[] }>),
+
+  /** How hard it thinks. Cheap questions do not need 'high'; wrong answers cost more. */
+  setEffort: (effort: string, sessionId: string) =>
+    fetch('/api/agent/effort', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ effort, sessionId }),
+    }).then(json<{ effort: string; efforts: string[] }>),
+
+  /** Stop the current turn. Pending approvals deny, pending questions release. */
+  interrupt: (sessionId: string) =>
+    fetch('/api/agent/interrupt', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId }),
+    }).then(json<{ interrupted: boolean }>),
 
   /**
    * Hand files to the agent — a wind profile, a load trace, a cost table.
@@ -163,13 +230,15 @@ export const api = {
    * for data the user could not give it. Multipart, no Content-Type header: the
    * browser must set its own multipart boundary.
    */
-  uploadFiles: (files: File[], sessionId: string) => {
+  uploadFiles: (files: File[], sessionId: string, conversationId: string | null) => {
     const body = new FormData();
     files.forEach((file) => body.append('files', file, file.name));
-    return fetch(`/api/agent/files?session_id=${encodeURIComponent(sessionId)}`, {
-      method: 'POST',
-      body,
-    }).then(json<{ files: UploadedFile[] }>);
+    // Named conversation, not just session: the file is stored in that
+    // conversation's directory so it travels with the project it belongs to.
+    const q = new URLSearchParams({ session_id: sessionId });
+    if (conversationId) q.set('conversation_id', conversationId);
+    return fetch(`/api/agent/files?${q.toString()}`, { method: 'POST', body })
+      .then(json<{ files: UploadedFile[] }>);
   },
 
   /** Answer a pending `ask_user`. Until this lands the agent is BLOCKED — it is
@@ -199,6 +268,7 @@ export function subscribeChat(
     'tool.start', 'tool.end',
     'approval.request', 'approval.resolved',
     'chart.show',
+    'show.request',
     'assumption.recorded',
     'question.request', 'question.resolved',
   ];

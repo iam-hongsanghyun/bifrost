@@ -1,10 +1,21 @@
 """Conversation attachments — files the user drops into the Bifrost chat.
 
-Uploads land under ``backend/data/agent/uploads/<session>/`` with a random
-prefix (no name collisions, no path tricks); the agent reads them through the
-``read_attachment`` tool, which is hard-limited to this directory. Text files
-are previewed in line windows; binary files report type + size only, so a
-dropped workbook or netCDF never floods the model's context.
+Uploads land in the CONVERSATION's own directory, beside its ``project.zip``,
+``events.json`` and assumption register::
+
+    <conversations>/<conversation-id>/attachments/<random>-<name>
+
+They were keyed by SESSION, which put every conversation's files in one shared
+folder outside the thing that gets saved, moved or re-imported. A wind profile
+the user handed over would then be missing from the conversation that depends on
+it — while the transcript still cited its path, so the agent would either fail to
+read it or, worse, fall back to synthesising one. An input is part of the study,
+so it lives with the study.
+
+Names get a random prefix (no collisions, no path tricks) and reads are hard
+limited to the conversation's own attachment directory. Text files are previewed
+in line windows; binary files report type + size only, so a dropped workbook or
+netCDF never floods the model's context.
 """
 from __future__ import annotations
 
@@ -16,25 +27,31 @@ from typing import Any, BinaryIO
 
 from ..config import CONFIG
 
-_DATA_DIR = CONFIG.data_dir
-
 MAX_FILE_BYTES = 200 * 1024 * 1024
 MAX_FILES_PER_UPLOAD = 20
 _PREVIEW_CHAR_CAP = 8_000
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 
 
-def root(session_id: str) -> Path:
-    base = Path(os.environ.get("RAGNAROK_AGENT_UPLOAD_DIR", str(_DATA_DIR / "agent" / "uploads")))
-    return base / session_id
+def root(conversation_id: str) -> Path:
+    """Where this conversation's attachments live.
+
+    ``RAGNAROK_AGENT_UPLOAD_DIR`` still overrides the base (tests, and anyone who
+    wants uploads on another volume); without it they sit inside the conversation
+    directory so a saved or copied conversation carries its inputs.
+    """
+    override = os.environ.get("RAGNAROK_AGENT_UPLOAD_DIR")
+    if override:
+        return Path(override) / conversation_id
+    return CONFIG.conversations_dir / conversation_id / "attachments"
 
 
-def save(session_id: str, filename: str, stream: BinaryIO) -> dict[str, Any]:
+def save(conversation_id: str, filename: str, stream: BinaryIO) -> dict[str, Any]:
     """Store one uploaded file; returns ``{name, storedAs, path, size}``.
 
     Raises ``ValueError`` when the stream exceeds :data:`MAX_FILE_BYTES`.
     """
-    directory = root(session_id)
+    directory = root(conversation_id)
     directory.mkdir(parents=True, exist_ok=True)
     safe = _SAFE_NAME.sub("_", filename or "file").strip("._") or "file"
     stored = f"{uuid.uuid4().hex[:8]}-{safe}"
@@ -56,9 +73,9 @@ def save(session_id: str, filename: str, stream: BinaryIO) -> dict[str, Any]:
     return {"name": filename, "storedAs": stored, "path": str(dest), "size": size}
 
 
-def _resolve_inside(session_id: str, path: str) -> Path | None:
+def _resolve_inside(conversation_id: str, path: str) -> Path | None:
     """Resolve ``path`` and require it inside the session's upload root."""
-    base = root(session_id).resolve()
+    base = root(conversation_id).resolve()
     try:
         target = Path(path).resolve()
     except OSError:
@@ -73,14 +90,14 @@ def _resolve_inside(session_id: str, path: str) -> Path | None:
 
 
 def read_preview(
-    session_id: str, path: str, *, offset: int = 0, limit: int = 200
+    conversation_id: str, path: str, *, offset: int = 0, limit: int = 200
 ) -> dict[str, Any]:
     """A bounded text window of an attachment (or a binary/size report).
 
     ``offset``/``limit`` are LINES for text files. The result is shaped for the
     agent: content plus enough metadata to decide the next window.
     """
-    target = _resolve_inside(session_id, path)
+    target = _resolve_inside(conversation_id, path)
     if target is None or not target.is_file():
         return {"error": f"no attachment at {path!r} (attachments live only in this conversation's upload folder)"}
     size = target.stat().st_size
@@ -118,8 +135,8 @@ def read_preview(
     }
 
 
-def list_files(session_id: str) -> list[dict[str, Any]]:
-    directory = root(session_id)
+def list_files(conversation_id: str) -> list[dict[str, Any]]:
+    directory = root(conversation_id)
     if not directory.is_dir():
         return []
     out = []

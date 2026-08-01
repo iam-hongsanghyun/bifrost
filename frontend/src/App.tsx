@@ -15,6 +15,7 @@ import {
   api, ChatEvent, ClientConfig, Conversation, ConversationGroup, EngineInfo, engineApi, Health,
   subscribeChat, subscribeEngine, UploadedFile,
 } from './api';
+import { AgentControls } from './components/AgentControls';
 import { ChatPane } from './components/ChatPane';
 import { ConversationRail } from './components/ConversationRail';
 import { EngineSetup } from './components/EngineSetup';
@@ -42,6 +43,7 @@ export default function App() {
   // The transcript is persisted as it grows, not only on close — a crashed tab
   // must not cost the conversation. Kept in a ref so the debounce does not need
   // `events` as a dependency and restart the timer on every token.
+  const frameRef = useRef<HTMLIFrameElement>(null);
   const eventsRef = useRef<ChatEvent[]>([]);
   eventsRef.current = events;
 
@@ -240,9 +242,30 @@ export default function App() {
     }
   };
 
+  /**
+   * Follow the agent's pointer: switch to the Ragnarok tab and tell it what to
+   * show. Ragnarok validates the origin and whitelists the tab on its side, so
+   * this is a request, not a remote control.
+   */
+  const showInRagnarok = (event: ChatEvent) => {
+    if (!config) return;
+    setTab('ragnarok');
+    const message = {
+      type: 'ragnarok:show',
+      tab: event.tab ?? 'Model',
+      select: event.select ?? '',
+      view: event.view ?? '',
+    };
+    // The iframe may still be mounting on first switch; a short retry costs
+    // nothing and avoids a click that silently does nothing.
+    const send = () => frameRef.current?.contentWindow?.postMessage(message, config.ragnarokBase);
+    send();
+    window.setTimeout(send, 400);
+  };
+
   const upload = async (files: File[]) => {
     if (!config) throw new Error('Not connected yet.');
-    const stored = await api.uploadFiles(files, config.sessionId);
+    const stored = await api.uploadFiles(files, config.sessionId, activeId);
     return stored.files;
   };
 
@@ -281,6 +304,9 @@ export default function App() {
           </button>
         </div>
         <span className="topbar-right muted">
+          {config && (
+            <AgentControls sessionId={config.sessionId} busy={busy} onError={setError} />
+          )}
           {engineDown ? 'engine offline' : config ? `session ${config.sessionId}` : ''}
           <button className="btn-ghost sm" onClick={() => setShowSetup(true)} title="Engine settings">
             engine
@@ -330,6 +356,7 @@ export default function App() {
               void api.answerQuestion(id, answer).catch((e) =>
                 setError(e instanceof Error ? e.message : 'Could not send that answer.'));
             }}
+            onShowInRagnarok={showInRagnarok}
             onDecideApproval={(id, decision) => {
               void api.decideApproval(id, decision).catch((e) =>
                 setError(e instanceof Error ? e.message : 'Could not send that decision.'));
@@ -341,7 +368,7 @@ export default function App() {
             Ragnarok and lose its scroll, open sheet and map viewport. */}
         <div className={`pane pane--frame${tab === 'ragnarok' ? '' : ' is-hidden'}`}>
           {config && (
-            <iframe className="engine-frame" src={config.ragnarokBase} title="Ragnarok" />
+            <iframe ref={frameRef} className="engine-frame" src={config.ragnarokBase} title="Ragnarok" />
           )}
         </div>
       </main>

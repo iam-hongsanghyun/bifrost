@@ -35,6 +35,8 @@ def agent_status(session_id: str = Query("default", alias="session_id")) -> dict
         "autonomy": session.autonomy if session else service.peek_autonomy(session_id),
         "model": session.model if session else service.peek_model(session_id),
         "models": service.model_choices(),
+        "effort": session.effort if session else service.peek_effort(session_id),
+        "efforts": list(service.EFFORT_CHOICES),
         "costUsd": round(session.cost_usd, 4) if session else 0.0,
         "pendingApprovals": approvals.pending_for(session.conversation_id) if session else [],
         "pendingQuestions": questions.pending_for(session.conversation_id) if session else [],
@@ -73,7 +75,13 @@ async def agent_chat(payload: ChatRequest) -> dict[str, Any]:
     else:
         session = service.get_or_create(payload.sessionId)
     if session.busy and payload.conversationId not in (None, session.conversation_id):
-        raise HTTPException(status_code=409, detail="agent_busy: another conversation is running.")
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "The agent is still working on another conversation. Wait for it to "
+                "finish, or press Stop there first."
+            ),
+        )
     conversation_id = await session.chat(message, autonomy=payload.autonomy)
     return {"conversationId": conversation_id}
 
@@ -117,13 +125,17 @@ def agent_answer_question(question_id: str, payload: QuestionAnswerRequest) -> d
 @router.post("/files")
 async def agent_upload_files(
     session_id: str = Query("default", alias="session_id"),
+    conversation_id: str | None = Query(None, alias="conversation_id"),
     files: list[UploadFile] = FastAPIFile(...),
 ) -> dict[str, Any]:
     """Store conversation attachments (chat drag-drop / + button).
 
-    Files land in this session's upload folder; the agent reads them with the
-    read_attachment tool. Values: name, storedAs, path, size per file.
+    Files land in the CONVERSATION's directory so they travel with it; the agent
+    reads them with read_attachment. Values: name, storedAs, path, size per file.
+    Falls back to the live session's conversation when the caller does not name
+    one, so an older client keeps working.
     """
+    target = conversation_id or service.peek_conversation_id(session_id) or session_id
     if len(files) > attachments.MAX_FILES_PER_UPLOAD:
         raise HTTPException(
             status_code=413,
@@ -132,7 +144,7 @@ async def agent_upload_files(
     saved = []
     for f in files:
         try:
-            saved.append(attachments.save(session_id, f.filename or "file", f.file))
+            saved.append(attachments.save(target, f.filename or "file", f.file))
         except ValueError as exc:
             raise HTTPException(status_code=413, detail=str(exc)) from exc
     return {"files": saved}
@@ -151,9 +163,38 @@ async def agent_set_model(payload: ModelRequest) -> dict[str, Any]:
         await session.set_model(payload.model)
     except RuntimeError as exc:
         raise HTTPException(
-            status_code=409, detail="agent_busy: wait for the current turn to finish."
+            status_code=409,
+            detail=(
+                "The agent is mid-turn, and this takes effect at the start of one. "
+                "Wait for it to finish, or press Stop, then try again."
+            ),
         ) from exc
     return {"model": session.model, "models": service.model_choices()}
+
+
+class EffortRequest(BaseModel):
+    sessionId: str = "default"
+    effort: str = "high"
+
+
+@router.post("/effort")
+async def agent_set_effort(payload: EffortRequest) -> dict[str, Any]:
+    """Select reasoning effort (persists across restarts)."""
+    session = service.get_or_create(payload.sessionId)
+    try:
+        await session.set_effort(payload.effort)
+    except ValueError as exc:
+        # A bad level is the caller's mistake, not a busy agent — say which.
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "The agent is mid-turn, and this takes effect at the start of one. "
+                "Wait for it to finish, or press Stop, then try again."
+            ),
+        ) from exc
+    return {"effort": session.effort, "efforts": list(service.EFFORT_CHOICES)}
 
 
 class ConversationImportRequest(BaseModel):
