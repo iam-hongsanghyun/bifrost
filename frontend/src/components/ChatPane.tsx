@@ -101,6 +101,8 @@ function toRows(events: ChatEvent[]): Row[] {
           title: event.title,
           kind: event.chartKind,
           unit: event.unit,
+          unitRight: event.unitRight,
+          stacked: event.stacked,
           note: event.note,
           x: event.x,
           series: event.series,

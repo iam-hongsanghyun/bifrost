@@ -201,20 +201,19 @@ kbd { font-family: var(--mono); font-size: 0.9em; border: 1px solid var(--border
 .md-table tbody tr:last-child td { border-bottom: none; }
 
 /* ── Charts the agent draws ─────────────────────────────────────────────────── */
-.chart { margin: 4px 0 10px; max-width: 76ch; }
-.chart-title { font-weight: 650; margin-bottom: 4px; }
-.chart-svg { width: 100%; height: auto; display: block; background: var(--surface);
-             border: 1px solid var(--border); border-radius: var(--radius); }
-.chart-grid { stroke: var(--border); stroke-width: 1; }
-.chart-cross { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; }
-.chart-ylabel { fill: var(--muted); font-size: 10px; text-anchor: end; dominant-baseline: middle; }
-.chart-xlabel { fill: var(--muted); font-size: 10px; text-anchor: middle; }
-.chart-legend { display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
-                margin-top: 6px; font-size: 12px; color: var(--muted); }
-.chart-key { display: inline-flex; align-items: center; gap: 5px; }
-.chart-key i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
-.chart-key strong { color: var(--text); font-family: var(--mono); font-size: 11px; }
-.chart-at { font-family: var(--mono); font-size: 11px; }
+.chart { margin: 4px 0 10px; max-width: 76ch; border: 1px solid var(--border);
+         border-radius: var(--radius); background: var(--surface); padding: 10px 12px 8px; }
+.chart-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 2px; }
+.chart-title { font-weight: 650; }
+/* Tools sit with the title, not over the plot — they must not cover data. */
+.chart-tools { margin-left: auto; display: flex; gap: 4px; }
+.chart-tools .btn-ghost { font-size: 11px; padding: 2px 7px; border-color: var(--border); }
+.chart-tools .btn-ghost.is-on { color: var(--brand);
+                                border-color: color-mix(in srgb, var(--brand) 50%, var(--border));
+                                background: color-mix(in srgb, var(--brand) 8%, transparent); }
+/* ECharts needs a fixed pixel height: it measures its host, and a host sized by
+   its content collapses to zero and renders nothing. */
+.chart-canvas { width: 100%; height: 300px; }
 .chart-note { margin: 5px 0 0; font-size: 12px; color: var(--muted); }
 
 /* ── Assumptions ─────────────────────────────────────────────────────────────

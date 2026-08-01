@@ -53,8 +53,12 @@ export interface ChatEvent {
   title?: string;
   chartKind?: string;
   x?: string[];
-  series?: { name: string; values: number[] }[];
+  series?: { name: string; values: number[]; axis?: string; kind?: string }[];
   unit?: string;
+  /** Secondary axis label — price in $/MWh against dispatch in MW. */
+  unitRight?: string;
+  /** Stack the series: dispatch by carrier, capacity by technology. */
+  stacked?: boolean;
   note?: string;
   /** assumption.recorded */
   id?: string;

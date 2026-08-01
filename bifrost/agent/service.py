@@ -294,7 +294,17 @@ class AgentSession:
             ][: len(x)]
             if not values:
                 continue
-            series.append({"name": str(raw.get("name") or "series"), "values": values})
+            entry: dict[str, Any] = {
+                "name": str(raw.get("name") or "series"), "values": values,
+            }
+            # A price in $/MWh on the same axis as dispatch in MW makes one of them
+            # invisible, so a series can opt out onto the right-hand axis — and opt
+            # out of the stack, since stacking a price is meaningless.
+            if str(raw.get("axis") or "").lower() == "right":
+                entry["axis"] = "right"
+            if raw.get("kind"):
+                entry["kind"] = str(raw["kind"])
+            series.append(entry)
         if not x or not series:
             return "Not drawn: a chart needs an x axis and at least one series with numbers."
         payload = {
@@ -305,11 +315,13 @@ class AgentSession:
             # the event name, and overloading it made the chart type unreadable.
             "chartKind": str(args.get("kind") or "line"),
             "unit": str(args.get("unit") or ""),
+            "unitRight": str(args.get("unitRight") or ""),
+            "stacked": bool(args.get("stacked")),
             "note": str(args.get("note") or ""),
             "x": x,
             "series": series,
         }
-        self._publish("chart.show", "assumption.recorded", payload)
+        self._publish("chart.show", payload)
         return f"Drawn: {payload['title']} ({len(series)} series, {len(x)} points)."
 
     async def _handle_ask_user(self, args: dict[str, Any]) -> str:
@@ -594,14 +606,30 @@ def _sdk_backend(session: AgentSession) -> AgentBackend:
         "carrier mix, a cost or emissions breakdown, a comparison across scenarios. "
         "Pass data you already fetched; do not re-fetch to chart it. One chart per "
         "point you are making, with the sentence that interprets it — a chart with no "
-        "claim attached is decoration.",
+        "claim attached is decoration. The chart the user gets is interactive: they "
+        "can zoom the time axis, toggle series off, read every series at one snapshot, "
+        "and flip it to a duration curve — so send the real resolution rather than "
+        "pre-summarising, and prefer ONE stacked chart over several thin ones.",
         {
             "type": "object",
             "properties": {
                 "title": {"type": "string", "description": "What the chart shows, in a few words."},
                 "kind": {
-                    "type": "string", "enum": ["line", "area", "bar"],
-                    "description": "line/area for anything over snapshots or time; bar for categories.",
+                    "type": "string", "enum": ["line", "area", "bar", "scatter", "heatmap"],
+                    "description": (
+                        "line/area over snapshots or time; bar for categories; scatter for "
+                        "one quantity against another; heatmap for a pattern across two "
+                        "dimensions — for a heatmap each series is a ROW (e.g. one per day) "
+                        "and x is the columns (e.g. hour of day)."
+                    ),
+                },
+                "stacked": {
+                    "type": "boolean",
+                    "description": (
+                        "Stack the series so they sum — the dispatch stack by carrier, "
+                        "capacity by technology. Use it whenever the series are parts of a "
+                        "whole; a stacked area against load is the canonical dispatch chart."
+                    ),
                 },
                 "x": {
                     "type": "array", "items": {"type": "string"},
@@ -615,11 +643,24 @@ def _sdk_backend(session: AgentSession) -> AgentBackend:
                         "properties": {
                             "name": {"type": "string"},
                             "values": {"type": "array", "items": {"type": "number"}},
+                            "axis": {
+                                "type": "string", "enum": ["left", "right"],
+                                "description": (
+                                    "'right' for a series in different units on the same x — "
+                                    "price in $/MWh over dispatch in MW. A right-axis series "
+                                    "is never stacked."
+                                ),
+                            },
+                            "kind": {
+                                "type": "string", "enum": ["line", "area", "bar", "scatter"],
+                                "description": "Override this one series, e.g. a price LINE over stacked areas.",
+                            },
                         },
                         "required": ["name", "values"],
                     },
                 },
                 "unit": {"type": "string", "description": "MW, MWh, $/MWh, tCO2 … shown on the axis."},
+                "unitRight": {"type": "string", "description": "Unit for the right-hand axis, if used."},
                 "note": {"type": "string", "description": "Optional caveat shown under the chart."},
             },
             "required": ["title", "kind", "x", "series"],
