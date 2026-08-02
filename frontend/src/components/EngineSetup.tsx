@@ -64,6 +64,10 @@ export function EngineSetup({ info, onChanged }: Props) {
 
   const running = info.process.running;
   const ownedByUs = info.process.owner === 'bifrost';
+  // A DIFFERENT Ragnarok checkout is holding the port. Silence here is what let
+  // Bifrost drive another clone: same API, other code, other data directory, and
+  // the model the agent built nowhere to be seen.
+  const foreign = info.process.owner === 'foreign' ? info.process.foreignRoot : null;
 
   return (
     <div className="setup">
@@ -73,6 +77,15 @@ export function EngineSetup({ info, onChanged }: Props) {
           Bifrost is the agent; Ragnarok is the modelling engine. Point Bifrost at your
           Ragnarok folder once and it will start it for you from now on.
         </p>
+
+        {foreign && (
+          <div className="banner banner--error" role="alert">
+            Port {info.process.port} is served by <code>{foreign}</code>, not by the
+            Ragnarok you selected. Bifrost will not use it — it is a different checkout,
+            with its own data directory and its own model. Stop it, or give Bifrost a free
+            port with <code>RAGNAROK_API_BASE</code>.
+          </div>
+        )}
 
         {info.suggestions.length > 0 && (
           <section className="setup-block">

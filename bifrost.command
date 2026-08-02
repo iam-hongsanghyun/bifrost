@@ -18,6 +18,10 @@ REQ_HASH_FILE="$VENV_DIR/.req_hash"
 # (Ragnarok itself) — an adjacent pair outside the common dev defaults.
 API_PORT="${BIFROST_API_PORT:-8770}"
 UI_PORT="${BIFROST_UI_PORT:-8771}"
+# The ENGINE Bifrost drives, on its own port too. Not 8000: people run Ragnarok by
+# hand — often a second clone for a different study — and defaulting onto that port
+# meant Bifrost silently drove whatever answered there. Both can now run at once.
+export RAGNAROK_API_BASE="${RAGNAROK_API_BASE:-http://127.0.0.1:8772}"
 # Exported so vite.config.ts derives its proxy target from the SAME value the API is
 # started with; a literal there would break the UI whenever these are overridden.
 export BIFROST_API_PORT="$API_PORT"

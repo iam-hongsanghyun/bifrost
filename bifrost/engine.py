@@ -25,6 +25,7 @@ import signal
 import socket
 import subprocess
 import sys
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -138,13 +139,38 @@ def check_root(raw: str) -> EngineRootCheck:
 
 
 def port_busy(port: int, host: str = "127.0.0.1") -> bool:
-    """Whether something already answers on the port.
-
-    Used to adopt a Ragnarok the user started themselves instead of racing it.
-    """
+    """Whether something already answers on the port."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.settimeout(0.35)
         return sock.connect_ex((host, port)) == 0
+
+
+def served_root(base: str) -> str | None:
+    """Which checkout the engine on ``base`` is serving, or None if it will not say.
+
+    Adoption used to be "something answers on the port, so it must be mine". It is
+    not: a second clone of Ragnarok has the same API and different code, a
+    different data directory and a different model. Bifrost adopted one that way,
+    and the mismatch surfaced as "the model I built is not there" instead of as a
+    connection error — the worst possible symptom, because it looks like data loss.
+
+    `None` means "did not identify itself", which is treated as NOT ours: an engine
+    too old to answer is also an engine whose code Bifrost cannot rely on.
+    """
+    try:
+        with urllib.request.urlopen(f"{base.rstrip('/')}/api/identity", timeout=1.5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except Exception:  # noqa: BLE001 — unreachable, 404, garbage: all "not ours"
+        return None
+    root = data.get("root")
+    return str(root) if isinstance(root, str) and root else None
+
+
+def _same_checkout(a: str | Path, b: str | Path) -> bool:
+    try:
+        return Path(a).resolve() == Path(b).resolve()
+    except OSError:
+        return str(a) == str(b)
 
 
 class EngineProcess:
@@ -163,14 +189,22 @@ class EngineProcess:
         """Who owns the engine on the port: Bifrost, someone else, or nobody."""
         port = _port_of(CONFIG.ragnarok_api_base)
         busy = port_busy(port)
+        configured = load_root()
+        # WHOSE engine is this? "something answers" is not the same as "mine".
+        foreign_root: str | None = None
+        if busy and not self.running:
+            serving = served_root(CONFIG.ragnarok_api_base)
+            if configured is not None and (serving is None or not _same_checkout(serving, configured)):
+                foreign_root = serving or "an engine that did not identify itself"
         if self.running:
             owner = "bifrost"
         elif busy:
-            owner = "external"
+            owner = "foreign" if foreign_root else "external"
         else:
             owner = None
         return {
             "owner": owner,
+            "foreignRoot": foreign_root,
             "running": busy,
             "port": port,
             "root": str(self._root) if self._root else None,
@@ -184,12 +218,28 @@ class EngineProcess:
         if self.running:
             return {"started": False, "reason": "Bifrost already started the engine.", **self.status()}
         if port_busy(port):
+            serving = served_root(CONFIG.ragnarok_api_base)
+            if serving is not None and _same_checkout(serving, root):
+                return {
+                    "started": False,
+                    "reason": (
+                        f"Ragnarok from {root} is already serving on port {port}. Bifrost "
+                        "is using it rather than starting a second engine — two engines "
+                        "writing one session would interleave changes to the same model."
+                    ),
+                    **self.status(),
+                }
+            # A DIFFERENT checkout (or one that will not identify itself). Adopting
+            # it is how Bifrost ended up driving another clone: same API, other
+            # code, other data directory, and the user's model nowhere to be seen.
+            whose = serving or "an engine that did not identify itself"
             return {
                 "started": False,
                 "reason": (
-                    f"Something is already serving on port {port}. Bifrost is using it "
-                    "rather than starting a second engine — two engines writing one "
-                    "session would interleave changes to the same model."
+                    f"Port {port} is served by {whose}, not by {root}. Bifrost will not "
+                    "use it: it is a different checkout, with its own data directory and "
+                    "its own model. Stop it, or point Bifrost at a free port with "
+                    "RAGNAROK_API_BASE, then start the engine again."
                 ),
                 **self.status(),
             }

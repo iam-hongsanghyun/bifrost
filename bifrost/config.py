@@ -70,8 +70,14 @@ class Config:
         # silently pointed the data dir one level too high.
         repo_root = Path(__file__).resolve().parents[1]
         return cls(
+            # 8772, NOT Ragnarok's conventional 8000. The user runs their own
+            # Ragnarok by hand — often a different clone for a different study —
+            # and Bifrost defaulting onto that port meant it silently drove
+            # whatever was there: same API, other code, other data directory, and
+            # the model the agent built nowhere to be found. Its own port lets both
+            # run at once; `served_root` in engine.py refuses a stranger even here.
             ragnarok_api_base=os.environ.get(
-                "RAGNAROK_API_BASE", "http://127.0.0.1:8000"
+                "RAGNAROK_API_BASE", "http://127.0.0.1:8772"
             ).rstrip("/"),
             ragnarok_session_id=os.environ.get("RAGNAROK_SESSION_ID", "default"),
             data_dir=_env_path("BIFROST_DATA_DIR", repo_root / "backend" / "data"),

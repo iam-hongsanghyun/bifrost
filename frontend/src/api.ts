@@ -329,8 +329,11 @@ export interface EngineRootCheck {
 }
 
 export interface EngineProcessStatus {
-  /** 'bifrost' when we started it, 'external' when the user did, null when down. */
-  owner: 'bifrost' | 'external' | null;
+  /** 'bifrost' when we started it, 'external' when the user did, 'foreign' when
+   *  the port is held by a DIFFERENT Ragnarok checkout, null when down. */
+  owner: 'bifrost' | 'external' | 'foreign' | null;
+  /** Which checkout is squatting the port, when owner is 'foreign'. */
+  foreignRoot?: string | null;
   running: boolean;
   port: number;
   root: string | null;
