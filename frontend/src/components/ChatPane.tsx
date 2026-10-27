@@ -23,6 +23,8 @@ import { specFor } from '../lib/chartEvents';
 
 interface Props {
   events: ChatEvent[];
+  /** Ask for the points of a stored chart that scrolled into view. */
+  onNeedChart: (chartId: string) => void;
   /** Partial assistant text still streaming, if any. */
   streaming: string;
   busy: boolean;
@@ -58,6 +60,31 @@ function FileChips({ files }: { files: UploadedFile[] }) {
   );
 }
 
+/** A stored chart before its points arrive: keeps its place, asks for them when seen. */
+function ChartStub({ event, onVisible }: { event: ChatEvent; onVisible: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const node = ref.current;
+    if (!node || typeof IntersectionObserver === 'undefined') {
+      onVisible();
+      return undefined;
+    }
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        observer.disconnect();
+        onVisible();
+      }
+    }, { rootMargin: '400px' });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [onVisible]);
+  return (
+    <div ref={ref} className="chart-stub" aria-busy="true">
+      {event.title ? `${event.title} - loading chart` : 'Loading chart'}
+    </div>
+  );
+}
+
 /** What the transcript renders: a message, a tool step, or folded plumbing. */
 type Row =
   | { kind: 'message'; event: ChatEvent; key: string }
@@ -66,6 +93,7 @@ type Row =
   | { kind: 'question'; event: ChatEvent; answered: string | null; key: string }
   | { kind: 'approval'; event: ChatEvent; decided: string | null; key: string }
   | { kind: 'chart'; spec: ChartSpec; key: string; chartId: string }
+  | { kind: 'chartStub'; event: ChatEvent; key: string; chartId: string }
   | { kind: 'assumption'; event: ChatEvent; key: string }
   | { kind: 'show'; event: ChatEvent; key: string };
 
@@ -112,6 +140,10 @@ function toRows(events: ChatEvent[]): Row[] {
     if (event.kind === 'chart.show' && event.x && event.series) {
       const chartId = event.chartId ?? `idx-${index}`;
       rows.push({ kind: 'chart', key: `chart-${chartId}`, chartId, spec: specFor(event) });
+      return;
+    }
+    if (event.kind === 'chart.show' && event.lazy && event.chartId && !event.x) {
+      rows.push({ kind: 'chartStub', event, key: `chart-${event.chartId}`, chartId: event.chartId });
       return;
     }
     if (event.kind === 'show.request') {
@@ -442,6 +474,9 @@ export function ChatPane(props: Props) {
                 </span>
               </button>
             );
+          }
+          if (row.kind === 'chartStub') {
+            return <ChartStub key={row.key} event={row.event} onVisible={() => props.onNeedChart(row.chartId)} />;
           }
           if (row.kind === 'chart') {
             return (

@@ -14,7 +14,11 @@ So a conversation is a directory:
         project.zip    Ragnarok project package — canonical model JSON + meta +
                        conversation sidecar + readable xlsx
         events.json    the chat transcript (also inside project.zip; this is the
-                       fast path so listing does not unzip)
+                       fast path so listing does not unzip). A ``chart.show`` event is
+                       stored here as a light stub (title, kind, units; ``lazy: true``)
+        charts/<chartId>.json
+                       the heavy part of each chart.show event (its ``x`` and ``series``
+                       arrays), loaded one chart at a time when the transcript draws it
 
 ``project.zip`` is Ragnarok's own format, written by its ``/api/export/project``
 and read by ``/api/import/project/load``. Bifrost does not define a project
@@ -47,6 +51,9 @@ _ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _PROJECT_NAME = "project.zip"
 _META_NAME = "meta.json"
 _EVENTS_NAME = "events.json"
+_CHARTS_DIR = "charts"
+#: The heavy fields of a chart.show event; everything else stays in events.json.
+_CHART_HEAVY = ("x", "series")
 #: Which conversation is live. Persisted so returning to Bifrost resumes where the
 #: user left off instead of dropping them on an empty shell next to a session that
 #: still holds their model.
@@ -187,7 +194,80 @@ class ConversationStore:
         except (json.JSONDecodeError, OSError):
             logger.exception("Unreadable transcript: %s", path)
             return []
-        return raw if isinstance(raw, list) else []
+        if not isinstance(raw, list):
+            return []
+        if any(_is_inline_chart(e) for e in raw):
+            # A transcript written before charts were split out: move the payloads to
+            # their own files once, so this and every later open is light. Idempotent
+            # (a chart file that exists is never rewritten) and atomic (events.json is
+            # replaced last, so a crash leaves the old, complete transcript).
+            raw = self._split_charts(conversation_id, raw)
+            self._write_json(path, raw)
+        return raw
+
+    def events_full(self, conversation_id: str) -> list[dict[str, Any]]:
+        """The transcript with every chart's x / series put back inline.
+
+        For a package that leaves Bifrost: the sidecar has to be self-contained,
+        because the recipient has no ``charts/`` directory to look stubs up in.
+        """
+        out: list[dict[str, Any]] = []
+        for event in self.events(conversation_id):
+            if isinstance(event, dict) and event.get("kind") == "chart.show" and event.get("lazy"):
+                heavy = self.chart(conversation_id, str(event.get("chartId") or "")) or {}
+                event = {**{k: v for k, v in event.items() if k != "lazy"}, **heavy}
+            out.append(event)
+        return out
+
+    def chart(self, conversation_id: str, chart_id: str) -> dict[str, Any] | None:
+        """The full ``chart.show`` payload of one chart, or ``None`` if unknown.
+
+        Falls back to an inline chart still sitting in ``events.json`` (a transcript
+        this version has not rewritten yet), so the lookup works for any conversation.
+        """
+        if not _safe_id(chart_id):
+            return None
+        path = self._dir(conversation_id) / _CHARTS_DIR / f"{chart_id}.json"
+        if path.exists():
+            try:
+                raw = json.loads(path.read_text("utf-8"))
+            except (json.JSONDecodeError, OSError):
+                logger.exception("Unreadable chart: %s", path)
+                return None
+            return raw if isinstance(raw, dict) else None
+        for event in self._read_events_raw(conversation_id):
+            if event.get("kind") == "chart.show" and event.get("chartId") == chart_id and "x" in event:
+                return {k: event[k] for k in _CHART_HEAVY if k in event}
+        return None
+
+    def _read_events_raw(self, conversation_id: str) -> list[dict[str, Any]]:
+        path = self._dir(conversation_id) / _EVENTS_NAME
+        try:
+            raw = json.loads(path.read_text("utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return []
+        return [e for e in raw if isinstance(e, dict)] if isinstance(raw, list) else []
+
+    def _split_charts(self, conversation_id: str, events: list[Any]) -> list[Any]:
+        """Write each inline chart's heavy fields to ``charts/<id>.json``; return stubs.
+
+        A chart without a usable ``chartId`` stays inline: it has nowhere to be looked
+        up from, and dropping its data would lose it.
+        """
+        out: list[Any] = []
+        for event in events:
+            if not _is_inline_chart(event):
+                out.append(event)
+                continue
+            chart_id = str(event.get("chartId") or "")
+            if not _safe_id(chart_id):
+                out.append(event)
+                continue
+            target = self._dir(conversation_id) / _CHARTS_DIR / f"{chart_id}.json"
+            if not target.exists():
+                self._write_json(target, {k: event[k] for k in _CHART_HEAVY if k in event}, indent=None)
+            out.append({**{k: v for k, v in event.items() if k not in _CHART_HEAVY}, "lazy": True})
+        return out
 
     def read_project(self, conversation_id: str) -> bytes | None:
         path = self.project_path(conversation_id)
@@ -243,6 +323,9 @@ class ConversationStore:
         conversation = self.get(conversation_id)
         if conversation is None:
             return None
+        # Charts first, transcript last: a crash between leaves orphan chart files,
+        # never a stub that points at nothing.
+        events = self._split_charts(conversation_id, events)
         self._write_json(self._dir(conversation_id) / _EVENTS_NAME, events)
         conversation.event_count = len(events)
         conversation.updated_at = _now()
@@ -287,11 +370,19 @@ class ConversationStore:
         self._write_json(self._dir(conversation.id) / _META_NAME, conversation.to_dict())
 
     @staticmethod
-    def _write_json(path: Path, payload: Any) -> None:
+    def _write_json(path: Path, payload: Any, *, indent: int | None = 2) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(path.suffix + ".part")
-        tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=indent, separators=None if indent else (",", ":")),
+            encoding="utf-8",
+        )
         tmp.replace(path)
+
+
+def _is_inline_chart(event: Any) -> bool:
+    """A chart.show event that still carries its x / series arrays."""
+    return isinstance(event, dict) and event.get("kind") == "chart.show" and any(k in event for k in _CHART_HEAVY)
 
 
 def _max_updated(items: list[Conversation]) -> float:

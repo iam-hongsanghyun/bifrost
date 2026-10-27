@@ -209,6 +209,8 @@ kbd { font-family: var(--mono); font-size: 0.9em; border: 1px solid var(--border
 .md-table tbody tr:last-child td { border-bottom: none; }
 
 /* ── Charts: one component, in the transcript, the State panel and full screen ── */
+.chart-stub { margin: 4px 0 10px; max-width: 76ch; min-height: 120px; padding: 12px; border: 1px dashed var(--border);
+  border-radius: var(--radius); color: var(--muted); font-size: var(--fs-sm); }
 .chart { margin: 4px 0 10px; max-width: 76ch; border: 1px solid var(--border);
          border-radius: var(--radius); background: var(--surface); padding: 10px 12px 8px; min-width: 0; }
 .chart--wide { max-width: none; }

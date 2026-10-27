@@ -234,27 +234,34 @@ class RagnarokClient:
         self, *, scenario: dict[str, Any] | None = None,
         options: dict[str, Any] | None = None,
         result: dict[str, Any] | None = None,
+        conversation: dict[str, Any] | None = None,
     ) -> bytes:
         """The session's model as a project ``.zip``.
 
         Ragnarok resolves the model from ``sessionId`` server-side and hydrates
         the time-series into it, so the bytes are complete even though Bifrost
-        never held the series.
+        never held the series. ``conversation`` (``{events, model, autonomy, ...}``)
+        is embedded as the package's chat sidecar: Ragnarok keeps no conversation
+        store, so whoever owns the chat has to hand it over. ``None`` omits the
+        sidecar (and an older Ragnarok that does not know the field ignores it).
         """
+        body: dict[str, Any] = {
+            "sessionId": self.session_id,
+            "scenario": scenario or {},
+            "options": options or {},
+            "result": result or {},
+        }
+        if conversation is not None:
+            body["conversation"] = conversation
         return await self._request(
-            "POST",
-            "/api/export/project",
-            json={
-                "sessionId": self.session_id,
-                "scenario": scenario or {},
-                "options": options or {},
-                "result": result or {},
-            },
-            expect_bytes=True,
+            "POST", "/api/export/project", json=body, expect_bytes=True,
         )
 
     async def import_project(self, data: bytes, filename: str) -> dict[str, Any]:
-        """Load a project ``.zip`` into the session and return its bundle.
+        """Parse a project ``.zip`` and return its bundle.
+
+        ``bundle["conversation"]`` is the package's chat sidecar (``None`` without
+        one) on a Ragnarok that surfaces it; an older one omits the key entirely.
 
         This is what makes switching conversations whole: the package carries the
         model, its data, the solved result and the chat, so restoring one restores

@@ -72,6 +72,22 @@ def get_conversation(conversation_id: str) -> dict[str, Any]:
     }
 
 
+@router.get("/{conversation_id}/charts/{chart_id}")
+def get_chart(conversation_id: str, chart_id: str) -> dict[str, Any]:
+    """One chart's ``x`` / ``series`` arrays.
+
+    The transcript lists a chart as a light stub (``lazy: true``) so opening a
+    conversation does not ship megabytes of points; the page asks for each chart
+    here as it scrolls into view.
+    """
+    if STORE.get(conversation_id) is None:
+        raise HTTPException(status_code=404, detail="Conversation not found.")
+    payload = STORE.chart(conversation_id, chart_id)
+    if payload is None:
+        raise HTTPException(status_code=404, detail="Chart not found.")
+    return payload
+
+
 @router.get("/{conversation_id}/assumptions")
 def get_assumptions(conversation_id: str) -> dict[str, Any]:
     """Every number the agent supplied itself, with its basis.
@@ -116,6 +132,29 @@ def delete_conversation(conversation_id: str) -> dict[str, Any]:
     return {"id": conversation_id, "deleted": STORE.delete(conversation_id)}
 
 
+def _sidecar(conversation_id: str) -> dict[str, Any] | None:
+    """The conversation as the chat sidecar Ragnarok embeds in a project package.
+
+    ``{version, conversationId, title, model, autonomy, events}`` with each chart's
+    points inline, so the package stays complete when it is handed to someone else.
+    ``None`` while there is no transcript: an empty sidecar would only be noise.
+    """
+    from ..agent import service
+
+    conversation = STORE.get(conversation_id)
+    events = STORE.events_full(conversation_id)
+    if conversation is None or not events:
+        return None
+    return {
+        "version": 1,
+        "conversationId": conversation_id,
+        "title": conversation.title,
+        "model": service.peek_model(CLIENT.session_id),
+        "autonomy": service.peek_autonomy(CLIENT.session_id),
+        "events": events,
+    }
+
+
 @router.post("/{conversation_id}/snapshot")
 async def snapshot_project(conversation_id: str) -> dict[str, Any]:
     """Capture the live Ragnarok session into this conversation's package.
@@ -134,7 +173,7 @@ async def snapshot_project(conversation_id: str) -> dict[str, Any]:
                 status_code=400,
                 detail="Ragnarok has no model loaded, so there is nothing to snapshot.",
             )
-        data = await CLIENT.export_project()
+        data = await CLIENT.export_project(conversation=_sidecar(conversation_id))
     except RagnarokUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except RagnarokError as exc:
@@ -177,7 +216,7 @@ async def activate_conversation(conversation_id: str) -> dict[str, Any]:
     # user came back to it.
     if meta_before and previous and previous != conversation_id:
         try:
-            outgoing = await CLIENT.export_project()
+            outgoing = await CLIENT.export_project(conversation=_sidecar(previous))
             STORE.save_project(previous, outgoing, version=meta_before.get("version"))
             logger.info("Auto-saved the model of conversation %s before switching", previous)
         except (RagnarokUnavailable, RagnarokError):
@@ -198,7 +237,7 @@ async def activate_conversation(conversation_id: str) -> dict[str, Any]:
             # this is the case where clearing destroyed the model the agent had just
             # built in this very conversation.
             try:
-                adopted = await CLIENT.export_project()
+                adopted = await CLIENT.export_project(conversation=_sidecar(conversation_id))
                 STORE.save_project(conversation_id, adopted, version=meta_before.get("version"))
                 data = adopted
                 logger.info("Adopted the live session into conversation %s", conversation_id)
@@ -259,10 +298,10 @@ def download_project(conversation_id: str) -> Any:
 def _sidecar_events(data: bytes) -> list[Any]:
     """The chat embedded in a project package, read straight from the zip.
 
-    Ragnarok's ``/api/import/project/load`` returns ``{model, scenario, options,
-    result, filename}`` and does not surface the ``<stem>.conversation.json``
-    sidecar, so relying on the bundle alone silently dropped the transcript of any
-    package that carried one. Absent or unreadable is simply "no chat".
+    FALLBACK only. A current Ragnarok returns the sidecar as ``bundle["conversation"]``
+    from ``/api/import/project/load``; an older one does not surface the
+    ``<stem>.conversation.json`` file at all, so for those the zip is the only way to
+    keep the transcript. Absent or unreadable is simply "no chat".
     """
     import io
     import json
@@ -277,6 +316,15 @@ def _sidecar_events(data: bytes) -> list[Any]:
     except (zipfile.BadZipFile, ValueError, OSError, AttributeError):
         return []
     return events if isinstance(events, list) else []
+
+
+def _bundle_events(bundle: dict[str, Any], data: bytes) -> list[Any]:
+    """The package's chat: Ragnarok's returned ``conversation`` when it sends the key
+    (even ``None``: that is its answer, "no chat"), else the zip, for older Ragnarok."""
+    if "conversation" in bundle:
+        events = (bundle["conversation"] or {}).get("events")
+        return events if isinstance(events, list) else []
+    return _sidecar_events(data)
 
 
 @router.post("/import")
@@ -301,7 +349,7 @@ async def import_conversation(file: UploadFile) -> dict[str, Any]:
 
     conversation = STORE.create(title=title)
     STORE.save_project(conversation.id, data)
-    events = (bundle.get("conversation") or {}).get("events") or _sidecar_events(data)
+    events = _bundle_events(bundle, data)
     if isinstance(events, list) and events:
         STORE.save_events(conversation.id, events)
     # Activating is what loads the model into the shared session — and what saves

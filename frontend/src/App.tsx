@@ -104,6 +104,25 @@ export default function App() {
     });
     return map;
   }, [events]);
+  // Stored charts open as stubs; fetch the points of the ones that are drawn (visible
+  // in the transcript) or pinned. One request per chart, never repeated.
+  const chartsRequested = useRef(new Set<string>());
+  useEffect(() => { chartsRequested.current = new Set(); }, [activeId]);
+  const loadChart = useCallback((chartId: string) => {
+    const conversationId = activeId;
+    if (!conversationId || chartsRequested.current.has(chartId)) return;
+    chartsRequested.current.add(chartId);
+    api.chart(conversationId, chartId)
+      .then((points) => setEvents((prev) => prev.map((e) => (
+        e.kind === 'chart.show' && e.chartId === chartId ? { ...e, ...points } : e
+      ))))
+      .catch(() => { chartsRequested.current.delete(chartId); });
+  }, [activeId]);
+  useEffect(() => {
+    events.forEach((e) => {
+      if (e.kind === 'chart.show' && e.lazy && !e.x && e.chartId && pinIds.includes(e.chartId)) loadChart(e.chartId);
+    });
+  }, [events, pinIds, loadChart]);
   const togglePin = (chartId: string) => {
     setPinIds((ids) => (ids.includes(chartId) ? ids.filter((i) => i !== chartId) : [...ids, chartId]));
   };
@@ -435,6 +454,7 @@ export default function App() {
           )}
           <ChatPane
             events={events}
+            onNeedChart={loadChart}
             streaming={streaming}
             busy={busy}
             disabled={chatDisabled}

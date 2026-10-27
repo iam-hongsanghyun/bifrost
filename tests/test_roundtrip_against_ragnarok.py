@@ -296,6 +296,64 @@ def test_importing_a_package_makes_it_a_live_conversation(wired, monkeypatch) ->
     assert store.get_active() == body["id"]
 
 
+def _chart_event(points: int = 500) -> dict:
+    return {
+        "kind": "chart.show", "chartId": "rt1", "title": "Dispatch", "chartKind": "line",
+        "x": [f"t{i}" for i in range(points)],
+        "series": [{"name": "gas", "values": [float(i) for i in range(points)]}],
+    }
+
+
+def test_the_chat_travels_in_the_package_and_comes_back_on_import(wired, monkeypatch) -> None:
+    """snapshot sends the transcript; Ragnarok embeds it and `import/project/load`
+    returns it as `conversation` - charts inline, so a package handed on is complete."""
+    store, client, app = wired
+    from fastapi.testclient import TestClient
+
+    from bifrost.conversations import router as conv_router
+    from bifrost.main import app as bifrost_app
+
+    monkeypatch.setattr(conv_router, "STORE", store)
+    monkeypatch.setattr(conv_router, "CLIENT", client)
+    monkeypatch.setattr("bifrost.assumptions.load", lambda _id: [])
+    engine_http = TestClient(app)
+    ui = TestClient(bifrost_app)
+
+    first = ui.post("/api/conversations", json={"title": "Peak week"}).json()
+    store.save_events(first["id"], [{"kind": "user", "text": "plot it"}, _chart_event()])
+    _put(engine_http, "default")
+    assert ui.post(f"/api/conversations/{first['id']}/snapshot").json()["hasProject"]
+
+    bundle = asyncio.run(client.import_project(store.read_project(first["id"]), "p.zip"))
+    chat = bundle["conversation"]
+    assert chat["conversationId"] == first["id"] and chat["title"] == "Peak week"
+    assert chat["events"][0]["text"] == "plot it"
+    assert len(chat["events"][1]["x"]) == 500, "charts must travel inline"
+
+    # Importing that package elsewhere recreates the chat from the returned field.
+    engine_http.post("/api/session/clear", params={"session_id": "default"})
+    resp = ui.post(
+        "/api/conversations/import",
+        files={"file": ("study.zip", store.read_project(first["id"]), "application/zip")},
+    )
+    assert resp.status_code == 200, resp.text
+    imported = resp.json()["id"]
+    assert imported != first["id"]
+    events = store.events(imported)
+    assert events[0]["text"] == "plot it" and events[1]["lazy"] is True
+    assert len(store.chart(imported, "rt1")["x"]) == 500
+
+
+def test_a_package_with_no_chat_returns_a_null_conversation(wired) -> None:
+    store, client, app = wired
+    from fastapi.testclient import TestClient
+
+    _put(TestClient(app), "default")
+    package = asyncio.run(client.export_project())
+    bundle = asyncio.run(client.import_project(package, "p.zip"))
+    assert "conversation" in bundle and bundle["conversation"] is None
+
+
 # ── the two approval gates must not stack ────────────────────────────────────────
 
 

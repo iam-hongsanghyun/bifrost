@@ -50,6 +50,8 @@ export interface ChatEvent {
   files?: UploadedFile[];
   /** chart.show */
   chartId?: string;
+  /** A stored chart arrives as a stub (no `x` / `series`) until `api.chart` fills it. */
+  lazy?: boolean;
   title?: string;
   chartKind?: string;
   x?: string[];
@@ -78,6 +80,14 @@ export interface ChatEvent {
   approvalId?: string;
   args?: Record<string, unknown>;
   decision?: string;
+}
+
+/** A hydrated stored chart goes back to the server as the stub it came as: the
+ *  points are already on disk, and re-sending megabytes every save helps no one. */
+export function slimEvent(event: ChatEvent): ChatEvent {
+  if (event.kind !== 'chart.show' || !event.lazy) return event;
+  const { x: _x, series: _series, ...stub } = event;
+  return stub;
 }
 
 /** One stored attachment. `path` is what `read_attachment` takes. */
@@ -185,8 +195,14 @@ export const api = {
     fetch(`/api/conversations/${id}/events`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ events }),
+      body: JSON.stringify({ events: events.map(slimEvent) }),
     }).then(json<Conversation>),
+
+  /** The points of one stored chart (its transcript entry is a `lazy` stub). */
+  chart: (id: string, chartId: string) =>
+    fetch(`/api/conversations/${id}/charts/${encodeURIComponent(chartId)}`).then(
+      json<Pick<ChatEvent, 'x' | 'series'>>,
+    ),
 
   /** Capture the live session into this conversation's package, so the stored
    *  world keeps up with the transcript describing it. */

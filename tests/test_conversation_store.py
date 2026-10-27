@@ -8,6 +8,7 @@ with the chat and survive a restart.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -233,3 +234,87 @@ def test_attachments_live_with_the_conversation_that_needs_them(tmp_path, monkey
     assert attachments.read_preview("conv-abc", saved["path"])["totalLines"] == 2
     # ...and not by any other, even given the full path.
     assert "no attachment" in attachments.read_preview("conv-xyz", saved["path"])["error"]
+
+
+# ── chart payloads live beside the transcript, not in it ─────────────────────────
+
+
+def _chart(chart_id: str = "c1", points: int = 5000) -> dict:
+    return {
+        "kind": "chart.show", "chartId": chart_id, "title": "Dispatch", "chartKind": "line", "unit": "MW",
+        "x": [f"t{i}" for i in range(points)],
+        "series": [{"name": "gas", "values": [float(i) for i in range(points)]}],
+    }
+
+
+def test_a_chart_is_stored_as_a_stub_and_its_points_in_their_own_file(store: ConversationStore) -> None:
+    c = store.create()
+    store.save_events(c.id, [{"kind": "user", "text": "plot"}, _chart()])
+
+    on_disk = (store.root / c.id / "events.json").read_text("utf-8")
+    assert "t4999" not in on_disk and len(on_disk) < 1000, "events.json must stay light"
+    stub = store.events(c.id)[1]
+    assert stub["lazy"] is True and "x" not in stub and "series" not in stub
+    assert (stub["title"], stub["chartKind"], stub["unit"], stub["chartId"]) == ("Dispatch", "line", "MW", "c1")
+
+    payload = store.chart(c.id, "c1")
+    assert payload is not None and len(payload["x"]) == 5000
+    assert payload["series"][0]["values"][-1] == 4999.0
+    assert store.get(c.id).event_count == 2
+
+
+def test_resaving_a_stub_keeps_it_a_stub_and_never_rewrites_the_points(store: ConversationStore) -> None:
+    """The browser sends back what it holds. A stub must stay a stub, and a hydrated
+    chart (points + lazy flag) must not overwrite the stored points."""
+    c = store.create()
+    store.save_events(c.id, [_chart()])
+    chart_file = store.root / c.id / "charts" / "c1.json"
+    stamp = chart_file.stat().st_mtime_ns
+
+    stub = store.events(c.id)
+    store.save_events(c.id, stub + [{"kind": "user", "text": "more"}])
+    hydrated = {**stub[0], **store.chart(c.id, "c1")}
+    store.save_events(c.id, [hydrated, {"kind": "user", "text": "more"}])
+
+    assert chart_file.stat().st_mtime_ns == stamp
+    assert all("x" not in e for e in store.events(c.id))
+    assert not list((store.root / c.id).rglob("*.part"))
+
+
+def test_a_legacy_transcript_with_inline_charts_is_still_readable_and_gets_split(store: ConversationStore) -> None:
+    """events.json as written before this change: charts inline. Reading it must work
+    unchanged, and the first read moves the points out so every later open is light."""
+    c = store.create()
+    legacy = [{"kind": "user", "text": "plot"}, _chart("old1", 100)]
+    (store.root / c.id / "events.json").write_text(json.dumps(legacy), "utf-8")
+
+    # Even before a rewrite, the chart can be fetched from the inline copy.
+    assert len(store.chart(c.id, "old1")["x"]) == 100
+
+    events = store.events(c.id)
+    assert events[1]["lazy"] is True and "x" not in events[1]
+    assert len(store.chart(c.id, "old1")["x"]) == 100
+    assert "t99" not in (store.root / c.id / "events.json").read_text("utf-8")
+    assert store.events(c.id) == events  # idempotent
+
+
+def test_events_full_puts_the_points_back_for_export(store: ConversationStore) -> None:
+    c = store.create()
+    original = _chart(points=50)
+    store.save_events(c.id, [{"kind": "user", "text": "plot"}, original])
+    full = store.events_full(c.id)
+    assert full[1] == original  # self-contained: no `lazy`, points inline
+
+
+def test_chart_ids_cannot_traverse_and_unknown_ids_are_none(store: ConversationStore) -> None:
+    c = store.create()
+    store.save_events(c.id, [_chart()])
+    assert store.chart(c.id, "../meta") is None
+    assert store.chart(c.id, "nope") is None
+
+
+def test_a_chart_without_an_id_stays_inline_rather_than_losing_its_points(store: ConversationStore) -> None:
+    c = store.create()
+    anonymous = {k: v for k, v in _chart(points=3).items() if k != "chartId"}
+    store.save_events(c.id, [anonymous])
+    assert store.events(c.id)[0]["x"] == ["t0", "t1", "t2"]
