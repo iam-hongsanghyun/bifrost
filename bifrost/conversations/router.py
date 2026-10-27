@@ -208,7 +208,7 @@ async def activate_conversation(conversation_id: str) -> dict[str, Any]:
             await CLIENT.clear_session()
             loaded = None
         else:
-            bundle = await CLIENT.import_project(data, f"{conversation_id}.zip")
+            bundle = await CLIENT.open_project(data, f"{conversation_id}.zip")
             loaded = {
                 "filename": bundle.get("filename"),
                 "hasResult": bool(bundle.get("result")),
@@ -256,6 +256,29 @@ def download_project(conversation_id: str) -> Any:
     )
 
 
+def _sidecar_events(data: bytes) -> list[Any]:
+    """The chat embedded in a project package, read straight from the zip.
+
+    Ragnarok's ``/api/import/project/load`` returns ``{model, scenario, options,
+    result, filename}`` and does not surface the ``<stem>.conversation.json``
+    sidecar, so relying on the bundle alone silently dropped the transcript of any
+    package that carried one. Absent or unreadable is simply "no chat".
+    """
+    import io
+    import json
+    import zipfile
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            name = next((n for n in zf.namelist() if n.lower().endswith(".conversation.json")), None)
+            if name is None:
+                return []
+            events = (json.loads(zf.read(name).decode("utf-8")) or {}).get("events")
+    except (zipfile.BadZipFile, ValueError, OSError, AttributeError):
+        return []
+    return events if isinstance(events, list) else []
+
+
 @router.post("/import")
 async def import_conversation(file: UploadFile) -> dict[str, Any]:
     """Adopt a project package as a new conversation, and activate it.
@@ -268,21 +291,24 @@ async def import_conversation(file: UploadFile) -> dict[str, Any]:
     if not data:
         raise HTTPException(status_code=400, detail="Empty upload.")
     title = (file.filename or "Imported conversation").rsplit(".", 1)[0]
-    conversation = STORE.create(title=title)
+    # Parse first, so a package Ragnarok refuses never becomes a conversation.
     try:
         bundle = await CLIENT.import_project(data, file.filename or "project.zip")
     except RagnarokUnavailable as exc:
-        STORE.delete(conversation.id)
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except RagnarokError as exc:
-        STORE.delete(conversation.id)
         raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
 
+    conversation = STORE.create(title=title)
     STORE.save_project(conversation.id, data)
-    events = (bundle.get("conversation") or {}).get("events") or []
+    events = (bundle.get("conversation") or {}).get("events") or _sidecar_events(data)
     if isinstance(events, list) and events:
         STORE.save_events(conversation.id, events)
-    return {
-        **(STORE.get(conversation.id) or conversation).to_dict(has_project=True),
-        "events": STORE.events(conversation.id),
-    }
+    # Activating is what loads the model into the shared session — and what saves
+    # the previous conversation's unsaved model first. Loading it here directly
+    # would replace that model without capturing it anywhere.
+    try:
+        return await activate_conversation(conversation.id)
+    except HTTPException:
+        STORE.delete(conversation.id)
+        raise

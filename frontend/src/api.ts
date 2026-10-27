@@ -96,6 +96,8 @@ export interface ClientConfig {
 /** What the agent is, and what it is doing right now. */
 export interface AgentStatus {
   available: boolean;
+  /** False until an engine checkout with its own venv is chosen: the agent then has no modelling tools. */
+  toolsConfigured?: boolean;
   auth: string;
   state: string;
   autonomy: string;

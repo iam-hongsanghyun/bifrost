@@ -124,7 +124,7 @@ class RagnarokClient:
         params: dict[str, Any] = {"session_id": self.session_id}
         if limit is not None:
             params["limit"] = limit
-        return await self._request("GET", "/api/journal", params=params)
+        return await self._request("GET", "/api/session/journal", params=params)
 
     # ── project packages: a conversation's whole world ────────────────────────
     async def export_project(
@@ -163,12 +163,59 @@ class RagnarokClient:
             files={"file": (filename, data, "application/zip")},
         )
 
+    async def load_model(
+        self, model: dict[str, Any], filename: str = "", scenario_name: str = ""
+    ) -> dict[str, Any]:
+        """Put a model into the shared session, replacing whatever is there.
+
+        ``/api/import/project/load`` only PARSES a package and returns the bundle —
+        "opening a file" in Ragnarok is the browser's job, and nothing is stored
+        server-side. Bifrost has no browser in that loop, so without this call the
+        session stays exactly as it was and a conversation "restored" its model
+        into a bundle nobody held.
+        """
+        return await self._request(
+            "POST",
+            "/api/session/model",
+            json={
+                "sessionId": self.session_id,
+                "model": model,
+                "filename": filename,
+                "scenarioName": scenario_name,
+            },
+        )
+
+    async def open_project(self, data: bytes, filename: str) -> dict[str, Any]:
+        """Parse a project ``.zip`` AND make it the session's working model.
+
+        The bundle is returned for the caller's own use (result, scenario, chat).
+        A package with no model clears the session instead of leaving the previous
+        one in place, for the reason ``/activate`` documents.
+        """
+        bundle = await self.import_project(data, filename)
+        model = bundle.get("model") or {}
+        if model:
+            await self.load_model(model, filename=bundle.get("filename") or filename)
+        else:
+            await self.clear_session()
+        return bundle
+
     async def clear_session(self) -> Any:
         """Drop the session's model. Used when a conversation with no project yet
-        becomes active, so it cannot inherit the previous one's model."""
+        becomes active, so it cannot inherit the previous one's model.
+
+        The session id travels as a QUERY parameter, which is how Ragnarok reads
+        it. It used to be sent in a JSON body that Ragnarok ignores, so the call
+        cleared the ``default`` session whatever id was configured — correct by
+        accident for the default, destructive to the wrong session otherwise.
+        """
         return await self._request(
-            "POST", "/api/session/clear", json={"sessionId": self.session_id}
+            "POST", "/api/session/clear", params={"session_id": self.session_id}
         )
+
+    async def identity(self) -> dict[str, Any]:
+        """Which checkout is serving, and where its data lives."""
+        return await self._request("GET", "/api/identity")
 
 
 CLIENT = RagnarokClient()

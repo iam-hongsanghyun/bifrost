@@ -1,0 +1,3 @@
+# Test-only dependencies. The roundtrip suite additionally needs Ragnarok importable;
+# see README "Tests".
+pytest>=8

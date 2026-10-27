@@ -15,7 +15,7 @@ from fastapi import APIRouter, HTTPException, Query, UploadFile
 from fastapi import File as FastAPIFile
 from pydantic import BaseModel
 
-from . import AGENT_AVAILABLE, approvals, attachments, auth, policy, questions, service, transcript
+from . import AGENT_AVAILABLE, approvals, attachments, auth, catalog, policy, questions, service, transcript
 
 router = APIRouter(prefix="/api/agent", tags=["agent"])
 
@@ -23,10 +23,17 @@ router = APIRouter(prefix="/api/agent", tags=["agent"])
 @router.get("/status")
 def agent_status(session_id: str = Query("default", alias="session_id")) -> dict[str, Any]:
     """Availability + auth + live-session state, for the Assistant tab."""
+    from .. import engine
+
     agent_auth = auth.resolve()
     session = service.get(session_id)
+    root = engine.load_root()
     return {
         "available": AGENT_AVAILABLE,
+        # Without a chosen engine checkout the SDK is launched with NO modelling
+        # tools (service._sdk_backend omits the server rather than start it broken),
+        # so say so here instead of leaving the agent to report that it is helpless.
+        "toolsConfigured": bool(root and engine.find_interpreter(root)),
         "cliFound": bool(shutil.which("claude")) or AGENT_AVAILABLE,
         "auth": agent_auth.kind,
         "active": session is not None,
@@ -57,8 +64,8 @@ async def agent_chat(payload: ChatRequest) -> dict[str, Any]:
     if not AGENT_AVAILABLE:
         raise HTTPException(
             status_code=503,
-            detail="The embedded agent needs claude-agent-sdk — install "
-                   "backend/app/agent/requirements-agent.txt into the app venv.",
+            detail="The embedded agent needs claude-agent-sdk — run "
+                   "`pip install -r requirements-agent.txt` in Bifrost's own venv.",
         )
     if auth.resolve().kind is None:
         raise HTTPException(
@@ -329,7 +336,42 @@ def agent_policy() -> dict[str, Any]:
     return {
         "levels": list(policy.AUTONOMY_LEVELS),
         "readOnly": sorted(policy.READ_ONLY),
+        "exports": sorted(policy.EXPORTS),
         "cheap": sorted(policy.CHEAP_EDITS),
         "alwaysGated": sorted(policy.ALWAYS_GATED),
         "expensive": sorted(policy.EXPENSIVE),
     }
+
+
+@router.get("/tools")
+def agent_tools(live: bool = False) -> dict[str, Any]:
+    """Every engine tool the agent can reach, and which autonomy levels ask first.
+
+    ``live=true`` also asks the engine checkout's own interpreter for its real
+    catalogue and reports drift against the policy — the tools it has that the
+    policy has never heard of, and the policy names that no longer exist. That is a
+    subprocess import of the engine's MCP server, so it is opt-in.
+    """
+    from .. import engine
+
+    root = engine.load_root()
+    interpreter = engine.find_interpreter(root) if root else None
+    table = catalog.policy_table()
+    out: dict[str, Any] = {
+        "mcpPrefix": policy.MCP_PREFIX,
+        "configured": root is not None and interpreter is not None,
+        "root": str(root) if root else None,
+        "interpreter": interpreter,
+        "classified": len(table),
+        "tools": table,
+    }
+    if live:
+        if root is None or interpreter is None:
+            raise HTTPException(status_code=409, detail="No Ragnarok engine is configured, so there is no catalogue to read.")
+        try:
+            tools = catalog.list_engine_tools(root, interpreter)
+        except (RuntimeError, OSError) as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        out["engineToolCount"] = len(tools)
+        out["drift"] = catalog.drift(tools)
+    return out

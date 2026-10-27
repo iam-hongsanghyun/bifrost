@@ -1,0 +1,929 @@
+{
+ "_about": "Snapshot of Ragnarok's MCP catalogue (backend/mcp, main @ 0a6c448): name, readOnly annotation, whether the tool takes confirm, and the tier its own _needs_confirm(cheap=...) call uses (true=cheap, false=expensive, null=none). Regenerate with GET /api/agent/tools?live=true against a newer checkout; tests/test_policy.py also compares against the live checkout when one is available.",
+ "tools": [
+  {
+   "name": "list_importers",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "source_health",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "get_world_state",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "get_sheet_page",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "derive_series",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "list_runs",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "get_analytics",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "list_report_perspectives",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "get_report",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "get_derived",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "get_queue",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "list_components",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "describe_component",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "describe_run_options",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "list_plugins",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "list_tab_modules",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "install_tab_module",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "set_tab_module_enabled",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": true
+  },
+  {
+   "name": "remove_tab_module",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "describe_analytics",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "edit_sheet",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": true
+  },
+  {
+   "name": "retarget_snapshots",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "forecast_demand",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "driver_forecast",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "ev_reshape_demand",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "cluster_network",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "adjust_carrier_capacity",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "add_bus",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": true
+  },
+  {
+   "name": "add_generator",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": true
+  },
+  {
+   "name": "add_load",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": true
+  },
+  {
+   "name": "add_line",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": true
+  },
+  {
+   "name": "add_storage",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": true
+  },
+  {
+   "name": "set_snapshots",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": true
+  },
+  {
+   "name": "add_component",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": true
+  },
+  {
+   "name": "set_component",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": true
+  },
+  {
+   "name": "remove_component",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "transform_series",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": true
+  },
+  {
+   "name": "clear_session",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "attach_renewable_profiles",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "attach_hydro_inflow",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "import_dataset",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "one_click_model",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "build_starter_pack",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "submit_solve",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "validate_model",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "check_model",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "get_sheet_stats",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "get_series_window",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "get_run_series",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "get_journal",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "get_journal_diff",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "get_master_meta",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "run_plugin_analysis",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "optimize_procurement",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "forge_query",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "promote_run",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "derive_from_master",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "run_plugin_transform",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "run_plugin_contribute",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "undo_journal_entry",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": true
+  },
+  {
+   "name": "revert_session",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "cancel_solve",
+   "readOnly": false,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "rerun_queue_item",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "delete_queue_item",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": true
+  },
+  {
+   "name": "set_queue_concurrency",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": true
+  },
+  {
+   "name": "rename_run",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": true
+  },
+  {
+   "name": "delete_run",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": null
+  },
+  {
+   "name": "export_run",
+   "readOnly": false,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "export_model",
+   "readOnly": false,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "import_network",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "import_project",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "export_workbook",
+   "readOnly": false,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "import_result",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "get_server_info",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "get_server_log",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "reload_config",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": true
+  },
+  {
+   "name": "list_examples",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "load_example",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "list_import_databases",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "list_starter_packs",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "list_import_countries",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "get_import_provenance",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "list_import_secrets",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "set_import_secret",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "delete_import_secret",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "get_distinct_values",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "get_run_model_sheet",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "load_queue_item",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "import_master",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "clear_master",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "get_plugin",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "install_plugin",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "uninstall_plugin",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "refresh_plugins",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "list_plugin_files",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "upload_plugin_file",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": true
+  },
+  {
+   "name": "delete_plugin_file",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "get_plugin_options",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "run_plugin_action",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": true
+  },
+  {
+   "name": "install_tab_module_zip",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "siting_scan",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "pypsa_earth_status",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "pypsa_earth_configure",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": true
+  },
+  {
+   "name": "pypsa_earth_build",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "pypsa_earth_build_status",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "pypsa_earth_stop",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": true
+  },
+  {
+   "name": "pypsa_earth_apply",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "physical_risk_libraries",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "physical_risk_seed",
+   "readOnly": false,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "physical_risk_get_portfolio",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "physical_risk_set_scenario",
+   "readOnly": false,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "physical_risk_run",
+   "readOnly": false,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "physical_risk_get_run",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "physical_risk_transition",
+   "readOnly": false,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "physical_risk_finance",
+   "readOnly": false,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "physical_risk_report",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "list_scenarios",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "describe_scenario",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "submit_scenario",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": null
+  },
+  {
+   "name": "submit_scenarios",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "save_scenario",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": true
+  },
+  {
+   "name": "set_active_scenario",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": true
+  },
+  {
+   "name": "delete_scenario",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "set_custom_dsl",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": true
+  },
+  {
+   "name": "compare_runs",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "get_kpis",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "compare_companies",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "get_asset_details",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "list_conversions",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "snap_to_buses",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "adjust_values",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "revert_adjustments",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "add_conversion",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "merge_fragment",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "apply_seasonal_rating",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "set_maintenance",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": true
+  },
+  {
+   "name": "import_pypsa_native",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "export_pypsa_native",
+   "readOnly": false,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "pypsa_io_capabilities",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "describe_piecewise",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "get_piecewise_curve",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "set_piecewise_curve",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": true
+  },
+  {
+   "name": "clear_piecewise_curve",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": true
+  },
+  {
+   "name": "check_piecewise_options",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "describe_optimise_options",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "export_lp",
+   "readOnly": false,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "consistency_check",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "network_analysis",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "get_statistics",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "temporal_cluster",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "slice_model",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "merge_models",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "cluster_network_hac",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "set_carrier_growth_limit",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": true
+  }
+ ]
+}

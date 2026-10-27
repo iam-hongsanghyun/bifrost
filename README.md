@@ -6,7 +6,7 @@ An AI-agentic power-modelling IDE. The agent does the modelling; Ragnarok is the
 
 Bifrost holds **no PyPSA, no solver, and no copy of the workbook.** Every modelling
 capability — sheets, solves, results, imports, transforms, topology reduction — lives
-in [Ragnarok](https://github.com/iam-hongsanghyun/project-bifrost) and is reached over
+in [Ragnarok](https://github.com/iam-hongsanghyun/project-Ragnarok) and is reached over
 HTTP.
 
 The previous incarnation was a fork of the whole engine: 136,000 lines carried so that
@@ -40,7 +40,7 @@ transcript, and a readable xlsx:
 ```
 backend/data/conversations/<id>/
     meta.json      group, title, timestamps, the journal version it was captured at
-    project.zip    Ragnarok's own format — model + data + result + transcript
+    project.zip    Ragnarok's own format — model + data + result (+ a transcript sidecar if the engine wrote one)
     events.json    the transcript again, so listing the rail needs no unzip
 ```
 
@@ -65,7 +65,7 @@ This needs no cooperation from Bifrost. Both surfaces point at **one Ragnarok se
 and Ragnarok journals every mutation at its store facade — whoever made it, through
 whatever route — then publishes a `session.version` event. So:
 
-- the agent edits via Ragnarok's API → journalled, tagged `actor=agent`
+- the agent edits via Ragnarok's API → journalled, tagged `actor=agent` and with the conversation id
 - the Ragnarok tab is the real Ragnarok UI, subscribed to that event stream
 - `tool.end` events carry the journal entry ids a tool produced, so the chat can show
   what each step actually changed
@@ -108,13 +108,59 @@ the Ragnarok tab works without it.
 Tests:
 
 ```bash
-python -m pytest tests -q
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m pytest tests -q
 ```
 
 `tests/test_roundtrip_against_ragnarok.py` drives Ragnarok's **real** app in-process over
-an ASGI transport — its actual export/import endpoints and session store, no server to
-start. It skips rather than fails when Ragnarok is not importable, so this suite stays
-runnable alone. Point it with `RAGNAROK_ROOT` (default `~/github/ragnarok`).
+an ASGI transport — its actual export/import/session/journal endpoints, its session store
+and its MCP server's confirm gate — with no server to start. It skips rather than fails
+when Ragnarok is not importable, so the suite stays runnable alone. Ragnarok needs
+PyPSA, pandas and the rest to import, which Bifrost's venv deliberately lacks, so to run it
+(it is skipped in the line above) use the engine checkout's own interpreter:
+
+```bash
+~/github/ragnarok/.venv-pypsa/bin/python -m pytest tests -q -p no:cacheprovider
+```
+
+Point it at another checkout with `RAGNAROK_ROOT` (default `~/github/ragnarok`). The same
+command runs `tests/test_policy.py`'s live half, which asks the checkout for its real tool
+catalogue and fails when the approval policy has fallen behind it.
+
+## The agent's tools and who approves them
+
+The agent's whole toolset is Ragnarok's MCP server (`python -m backend.mcp`, 154 tools at
+the time of writing), launched by the SDK from the **chosen checkout, on that checkout's own
+interpreter**. Two gates exist for a mutating tool, and they must not stack:
+
+- Ragnarok's own: a mutating tool returns a *preview* unless called with `confirm=true`,
+  depending on `RAGNAROK_MCP_AUTONOMY`.
+- Bifrost's: the SDK's `can_use_tool` callback raises an approval card
+  (`bifrost/agent/policy.py`), by autonomy level `manual` / `guided` / `auto` / `bypass`.
+
+Bifrost launches the MCP server with `RAGNAROK_MCP_AUTONOMY=auto`, which turns Ragnarok's gate
+**off**, so an approved call runs once instead of coming back as a preview. The policy is
+therefore the only gate, and it classifies every tool by name: read-only tools (including
+the whole results/statistics/comparison surface) always flow; file exports flow while they
+write inside the agent's working directory; cheap edits flow under `guided`; imports,
+transforms and model swaps ask under `guided`; solves, deletions, anything that installs or
+runs code, and stored credentials ask under `auto`. A tool the policy has never heard of asks
+at every level but `bypass`. `GET /api/agent/tools` lists every tool with the levels that ask
+about it, and `?live=true` compares it with the checkout's real catalogue.
+
+## Ragnarok routes Bifrost uses
+
+| Route | For |
+|---|---|
+| `GET /api/status`, `GET /api/identity` | readiness; refusing a different checkout on the port |
+| `GET /api/session/meta`, `POST /api/session/model`, `POST /api/session/clear?session_id=` | the shared session |
+| `GET /api/session/journal` | which journal entries a tool call produced |
+| `POST /api/export/project`, `POST /api/import/project/load` | a conversation's package |
+| `GET /api/events` | Ragnarok's `session.version` stream, read by the browser directly |
+
+`/api/import/project/load` only *parses* a package; Bifrost then puts the model into the
+session with `POST /api/session/model`. The tools themselves reach Ragnarok through the MCP
+server, not through Bifrost.
 
 ## Choosing the engine
 
@@ -126,6 +172,8 @@ Bifrost probes the obvious places (a sibling `ragnarok/`, `~/github/ragnarok`) a
 offers what it finds; otherwise the path is pasted. A directory is accepted only
 when it really is a Ragnarok checkout — `backend/app/main.py` and
 `backend/requirements.txt` must exist — and refusal says which marker was missing.
+A checkout without `backend/mcp/` is accepted but flagged: the engine would run and the
+agent would have no tools.
 Accepting anything and failing later at the first API call would report the problem
 far from the choice that caused it.
 
@@ -149,7 +197,8 @@ diagnosable there instead of only in a terminal you never opened.
 
 Copy `.env.example`. The two that matter:
 
-- `RAGNAROK_API_BASE` — where the engine is.
+- `RAGNAROK_API_BASE` — where the engine is (default `http://127.0.0.1:8772`; the agent's MCP
+  subprocess uses the same base unless `RAGNAROK_AGENT_API_BASE` says otherwise).
 - `RAGNAROK_SESSION_ID` — the session the agent and the embedded UI **both** act on.
   They must match, or the user watches a different model than the agent edits.
 
@@ -172,7 +221,7 @@ composer, and both event streams — Bifrost's for the chat and Ragnarok's
 **Known broken: the Ragnarok tab renders blank.** Not a layout bug — the iframe is
 present, sized and visible, and its `GET /` returns 200; Ragnarok is fine opened
 directly. The cause is that the UI on `localhost:8771` embedding the engine on
-`127.0.0.1:8000` is a *different origin*, so the frame gets partitioned storage and
+`127.0.0.1:8772` is a *different origin*, so the frame gets partitioned storage and
 Ragnarok's boot, which reads `localStorage`, dies inside it.
 
 The fix is same-origin, and it is not a one-line proxy: both apps serve their API at

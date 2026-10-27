@@ -19,7 +19,7 @@ interface Props {
   onError: (message: string) => void;
 }
 
-/** Shorten `claude-opus-4-8` to `opus-4-8`: the vendor prefix is never the choice. */
+/** Shorten `claude-opus-5-5` to `opus-5-5`: the vendor prefix is never the choice. */
 function shortModel(id: string): string {
   return id.replace(/^claude-/, '');
 }

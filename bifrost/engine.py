@@ -43,6 +43,10 @@ _MARKERS = ("backend/app/main.py", "backend/requirements.txt")
 #: ``.venv-pypsa``, so that is the one that already has PyPSA and the solver.
 _VENV_CANDIDATES = (".venv-pypsa/bin/python", ".venv/bin/python")
 
+#: The checkout's MCP server — the agent's whole modelling toolset. Not required to
+#: START the engine, so its absence is reported rather than refused.
+_MCP_MARKER = "backend/mcp/__main__.py"
+
 
 @dataclass(frozen=True)
 class EngineRootCheck:
@@ -135,6 +139,13 @@ def check_root(raw: str) -> EngineRootCheck:
             "run.command once to build .venv-pypsa, then Bifrost can start it.",
             None,
         )
+    if not (root / _MCP_MARKER).exists():
+        return EngineRootCheck(
+            str(root), True,
+            "Ragnarok found, but this checkout has no MCP server "
+            f"({_MCP_MARKER}), so the agent would have no modelling tools. Update it.",
+            interpreter,
+        )
     return EngineRootCheck(str(root), True, "Ragnarok found.", interpreter)
 
 
@@ -162,6 +173,8 @@ def served_root(base: str) -> str | None:
             data = json.loads(resp.read().decode("utf-8"))
     except Exception:  # noqa: BLE001 — unreachable, 404, garbage: all "not ours"
         return None
+    if not isinstance(data, dict) or data.get("app") != "ragnarok":
+        return None  # another program answering /api/identity is not an engine
     root = data.get("root")
     return str(root) if isinstance(root, str) and root else None
 

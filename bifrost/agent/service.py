@@ -2,12 +2,13 @@
 
 One :class:`AgentSession` per model session. The SDK client runs in streaming
 -input mode on the app's event loop; a consumer task translates SDK messages
-into the session's SSE channel (:mod:`backend.app.events_bus`), so the chat
+into the session's SSE channel (:mod:`bifrost.events_bus`), so the chat
 pane, tool cards, and approval cards are all driven by the same one-way stream
 the journal already uses.
 
-Tool access: the SDK spawns the existing ``backend/mcp`` server as a stdio
-subprocess pointed back at THIS backend with ``RAGNAROK_SESSION_ID=<session>``
+Tool access: the SDK spawns Ragnarok's MCP server (``python -m backend.mcp`` from
+the chosen checkout, on that checkout's own interpreter) as a stdio subprocess
+pointed at the ENGINE's API with ``RAGNAROK_SESSION_ID=<session>``
 and ``RAGNAROK_MCP_AUTONOMY=auto`` (no model-facing confirm dance) — gating is
 enforced here via ``can_use_tool`` → GUI approval cards (:mod:`.policy`,
 :mod:`.approvals`). Every mutation the agent makes therefore flows through the
@@ -35,7 +36,7 @@ from typing import Any, AsyncIterator, Callable, Protocol
 from .. import assumptions, events_bus, ragnarok
 from . import approvals, auth, policy, prompts, questions, transcript
 
-logger = logging.getLogger("pypsa_gui.agent")
+logger = logging.getLogger("bifrost.agent")
 
 from .. import engine
 from ..config import CONFIG
@@ -44,10 +45,14 @@ _REPO_ROOT = CONFIG.repo_root
 
 MAX_TURNS = int(os.environ.get("RAGNAROK_AGENT_MAX_TURNS", "50"))
 MAX_BUDGET_USD = float(os.environ.get("RAGNAROK_AGENT_MAX_BUDGET_USD", "0") or 0) or None
-API_BASE = os.environ.get("RAGNAROK_AGENT_API_BASE", "http://127.0.0.1:8000")
+# Where the MCP subprocess finds the engine. Defaults to the SAME base Bifrost's own
+# client uses: this used to default to :8000 while the client defaulted to :8772, so
+# the agent's tools edited whatever answered on 8000 — or nothing — while the UI
+# watched the engine Bifrost had started.
+API_BASE = os.environ.get("RAGNAROK_AGENT_API_BASE", "").strip().rstrip("/") or CONFIG.ragnarok_api_base
 DEFAULT_MODEL = os.environ.get("RAGNAROK_AGENT_MODEL") or None
 # Selectable models for the chat's picker; env-overridable (comma-separated ids).
-_MODEL_CHOICE_DEFAULTS = "claude-opus-4-8,claude-sonnet-5,claude-haiku-4-5"
+_MODEL_CHOICE_DEFAULTS = "claude-opus-5-5,claude-fable-5-1,claude-sonnet-5-5,claude-haiku-5-5"
 # Cap on the rendered prior-transcript context a fresh SDK session is primed with.
 RESTORED_CONTEXT_MAX_CHARS = int(os.environ.get("RAGNAROK_AGENT_RESTORE_MAX_CHARS", "20000"))
 
@@ -169,6 +174,9 @@ class AgentSession:
         #: dial rather than ours.
         self.effort: str = DEFAULT_EFFORT
         self.state: str = "idle"
+        #: The agent's file sandbox: its cwd, and where MCP exports land. Exports
+        #: to anywhere else need approval (policy.export_leaves_workdir).
+        self.workdir: Path = CONFIG.agent_dir / "workdir"
         self.cost_usd: float = 0.0
         self.turns: int = 0
         self._backend: AgentBackend | None = None
@@ -220,14 +228,11 @@ class AgentSession:
     async def _ragnarok_entries_since(self, since: int | None) -> list[int]:
         """Journal entry ids newer than ``since``.
 
-        Filtered by VERSION WINDOW only. In-process this used to also filter on
-        `origin.conversationId`, which Ragnarok cannot know over HTTP — its actor
-        middleware records *that* an agent made the change, not which conversation
-        it came from. So with two conversations mutating one session concurrently
-        these ids could over-report. That is not reachable today (a session hosts
-        one active conversation at a time, see `/activate`), and the honest fix is
-        for Bifrost to send a conversation header that Ragnarok's journal records
-        — a small change there, not a guess here.
+        Filtered by version window, and by `origin.conversationId` when the entry
+        carries one: the MCP subprocess sends this conversation's id as
+        `X-Ragnarok-Conversation` (``RAGNAROK_MCP_CONVERSATION``) and Ragnarok's
+        journal records it. An entry with no conversation (a human edit in the
+        Ragnarok tab) is kept, as before — the window is all that can be said.
         """
         if since is None:
             return []
@@ -239,6 +244,7 @@ class AgentSession:
         return sorted(
             int(e["id"]) for e in entries
             if isinstance(e, dict) and isinstance(e.get("id"), int) and e["id"] > since
+            and ((e.get("origin") or {}).get("conversationId") in (None, self.conversation_id))
         )
 
     def _set_state(self, state: str, **extra: Any) -> None:
@@ -264,7 +270,7 @@ class AgentSession:
                 message="Only the ragnarok modelling tools are enabled in Bifrost.",
                 interrupt=False,
             )
-        if not policy.requires_approval(tool_name, self.autonomy):
+        if not policy.requires_approval(tool_name, self.autonomy, tool_input, self.workdir):
             return PermissionResultAllow()
         approval = approvals.create(self.conversation_id, policy.short_tool_name(tool_name), tool_input)
         self._publish("approval.request", approval.card())
@@ -410,7 +416,12 @@ class AgentSession:
                                 "callId": block.id,
                                 "tool": policy.short_tool_name(block.name),
                                 "argsSummary": _summarize_args(block.input or {}),
-                                "gated": policy.requires_approval(block.name, self.autonomy),
+                                # SDK plumbing (ToolSearch…) never reaches can_use_tool, so
+                                # it is not "gated" however the policy would class it.
+                                "gated": block.name.startswith(policy.MCP_PREFIX)
+                                and policy.requires_approval(
+                                    block.name, self.autonomy, block.input or {}, self.workdir
+                                ),
                             })
                 elif isinstance(message, UserMessage):
                     content = message.content if isinstance(message.content, list) else []
@@ -788,11 +799,19 @@ def _sdk_backend(session: AgentSession) -> AgentBackend:
         "PYTHONPATH": str(_REPO_ROOT),
         "RAGNAROK_API_BASE": API_BASE,
         "RAGNAROK_SESSION_ID": session.session_id,
-        "RAGNAROK_MCP_AUTONOMY": "auto",  # gating happens in can_use_tool
+        # Ragnarok's own confirm=true gate OFF: gating happens once, in can_use_tool
+        # (see policy.py). Left on, an approved call would come back as a "preview".
+        "RAGNAROK_MCP_AUTONOMY": "auto",
+        # Bifrost owns the engine's lifecycle (engine.py). The MCP server's own
+        # autostart would race it for the port, and stop the engine on exit.
+        "RAGNAROK_MCP_AUTOSTART": "0",
+        "RAGNAROK_MCP_TRANSPORT": "stdio",
+        # Exports land in the agent's sandbox, not wherever the server was started.
+        "RAGNAROK_MCP_FILE_DIR": str(session.workdir),
         "RAGNAROK_MCP_ACTOR": "agent",
         "RAGNAROK_MCP_CONVERSATION": session.conversation_id,
     }
-    workdir = CONFIG.agent_dir / "workdir"
+    workdir = session.workdir
     workdir.mkdir(parents=True, exist_ok=True)
 
     # Ragnarok's MCP server is the agent's ENTIRE modelling toolset, and it lives in

@@ -8,9 +8,11 @@
  *
  * So this module answers three questions per event — what is happening, in words;
  * is this plumbing the user should not have to read; and is the result worth
- * showing. It is deliberately rule-based on the verb rather than a table of all 73
+ * showing. It is deliberately rule-based on the verb rather than a table of all 154
  * Ragnarok tools: a table would silently fall back to raw names the day a tool is
- * added, which is the failure mode being fixed.
+ * added, which is the failure mode being fixed. Whole-tool exceptions below are for
+ * the names whose verb alone would mislead (`submit_*` queues a solve, `check_*`
+ * reads the model back).
  */
 
 /** Prefixes the MCP servers put on their tools. */
@@ -24,7 +26,50 @@ const VERBS: ReadonlyArray<readonly [string, (rest: string) => string]> = [
   ['get_world_state', () => 'Reading the model'],
   ['describe_component', (r) => `Checking what ${subject(r) || 'a component'} accepts`],
   ['validate_model', () => 'Validating the model'],
+  ['check_model', () => 'Checking the model against what you asked for'],
+  ['consistency_check', () => 'Running PyPSA\'s consistency check'],
+  ['submit_scenarios', () => 'Queueing scenarios'],
+  ['submit_scenario', () => 'Queueing a scenario'],
+  ['submit_solve', () => 'Queueing a solve'],
+  ['cancel_solve', () => 'Cancelling a solve'],
+  ['temporal_cluster', () => 'Clustering the time axis'],
+  ['one_click_model', () => 'Building a model from a country'],
+  ['build_starter_pack', () => 'Building a starter pack'],
+  ['network_analysis', () => 'Analysing the grid topology'],
+  ['forge_query', () => 'Bulk-editing the model'],
+  ['merge_fragment', () => 'Merging a data fragment into the model'],
+  ['merge_models', () => 'Merging models'],
+  ['slice_model', () => 'Slicing the model'],
+  ['snap_to_buses', () => 'Snapping assets to buses'],
+  ['siting_scan', () => 'Scanning candidate sites'],
+  ['undo_journal_entry', () => 'Undoing a change'],
+  ['revert_session', () => 'Rolling the model back'],
   ['run_plugin_', (r) => `Running the ${subject(r)} plugin`],
+  ['compare_', (r) => `Comparing ${subject(r)}`],
+  ['check_', (r) => `Checking ${subject(r)}`],
+  ['save_', (r) => `Saving ${article(subject(r))}`],
+  ['submit_', (r) => `Queueing ${subject(r)}`],
+  ['load_', (r) => `Loading ${subject(r)}`],
+  ['install_', (r) => `Installing ${subject(r)}`],
+  ['uninstall_', (r) => `Uninstalling ${subject(r)}`],
+  ['attach_', (r) => `Attaching ${subject(r)}`],
+  ['adjust_', (r) => `Adjusting ${subject(r)}`],
+  ['apply_', (r) => `Applying ${subject(r)}`],
+  ['revert_', (r) => `Reverting ${subject(r)}`],
+  ['rename_', (r) => `Renaming ${subject(r)}`],
+  ['promote_', (r) => `Promoting ${subject(r)}`],
+  ['rerun_', (r) => `Re-running ${subject(r)}`],
+  ['retarget_', (r) => `Retargeting ${subject(r)}`],
+  ['forecast_', (r) => `Forecasting ${subject(r)}`],
+  ['driver_forecast', () => 'Forecasting demand from drivers'],
+  ['transform_', (r) => `Transforming ${subject(r)}`],
+  ['derive_', (r) => `Deriving ${subject(r)}`],
+  ['refresh_', (r) => `Refreshing ${subject(r)}`],
+  ['reload_', (r) => `Reloading ${subject(r)}`],
+  ['upload_', (r) => `Uploading ${subject(r)}`],
+  ['clear_', (r) => `Clearing ${subject(r)}`],
+  ['pypsa_earth_', (r) => `PyPSA-Earth: ${subject(r)}`],
+  ['physical_risk_', (r) => `Physical risk: ${subject(r)}`],
   ['get_', (r) => `Reading ${subject(r)}`],
   ['list_', (r) => `Listing ${subject(r)}`],
   ['read_', (r) => `Reading ${subject(r)}`],
@@ -108,6 +153,38 @@ export function describeToolDone(tool: string | undefined, ok: boolean): string 
     .replace(/^Optimising /, 'Optimised ')
     .replace(/^Reducing /, 'Reduced ')
     .replace(/^Validating /, 'Validated ')
+    .replace(/^Comparing /, 'Compared ')
+    .replace(/^Saving /, 'Saved ')
+    .replace(/^Queueing /, 'Queued ')
+    .replace(/^Loading /, 'Loaded ')
+    .replace(/^Installing /, 'Installed ')
+    .replace(/^Uninstalling /, 'Uninstalled ')
+    .replace(/^Attaching /, 'Attached ')
+    .replace(/^Adjusting /, 'Adjusted ')
+    .replace(/^Applying /, 'Applied ')
+    .replace(/^Reverting /, 'Reverted ')
+    .replace(/^Renaming /, 'Renamed ')
+    .replace(/^Promoting /, 'Promoted ')
+    .replace(/^Re-running /, 'Re-ran ')
+    .replace(/^Retargeting /, 'Retargeted ')
+    .replace(/^Forecasting /, 'Forecast ')
+    .replace(/^Transforming /, 'Transformed ')
+    .replace(/^Deriving /, 'Derived ')
+    .replace(/^Refreshing /, 'Refreshed ')
+    .replace(/^Reloading /, 'Reloaded ')
+    .replace(/^Uploading /, 'Uploaded ')
+    .replace(/^Clearing /, 'Cleared ')
+    .replace(/^Clustering /, 'Clustered ')
+    .replace(/^Cancelling /, 'Cancelled ')
+    .replace(/^Undoing /, 'Undid ')
+    .replace(/^Merging /, 'Merged ')
+    .replace(/^Slicing /, 'Sliced ')
+    .replace(/^Snapping /, 'Snapped ')
+    .replace(/^Scanning /, 'Scanned ')
+    .replace(/^Rolling /, 'Rolled ')
+    .replace(/^Bulk-editing /, 'Bulk-edited ')
+    .replace(/^Analysing /, 'Analysed ')
+    .replace(/^Building /, 'Built ')
     .replace(/^Solving$/, 'Solved')
     .replace(/^Asking you$/, 'Asked you');
 }
