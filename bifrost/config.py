@@ -50,6 +50,21 @@ class Config:
     #: without deriving it from its own nesting.
     repo_root: Path = Path(".")
 
+    #: Most x points a chart the agent draws may carry. A year of hourly snapshots
+    #: is 8,760; the old cap of 2,000 silently dropped the last ~70% of it. The
+    #: browser thins what it DRAWS (and restores detail on zoom), so this guards
+    #: the event stream, not the picture.
+    chart_max_points: int = 10_000
+
+    #: Most numbers (points x series) in one chart event. A 20-series year is
+    #: 175,200; beyond this the event is thinned, keeping peaks, rather than refused.
+    #: Matches the most the browser draws (MAX_DRAW_CELLS in lib/chartModel.ts).
+    chart_max_cells: int = 250_000
+
+    #: Most rows the State panel's table will pull from Ragnarok to sort / filter /
+    #: page server-side.
+    table_max_rows: int = 20_000
+
     @property
     def conversations_dir(self) -> Path:
         return self.data_dir / "conversations"
@@ -83,6 +98,9 @@ class Config:
             data_dir=_env_path("BIFROST_DATA_DIR", repo_root / "backend" / "data"),
             repo_root=repo_root,
             request_timeout_s=_env_int("BIFROST_REQUEST_TIMEOUT_S", 120),
+            chart_max_points=_env_int("BIFROST_CHART_MAX_POINTS", 10_000),
+            chart_max_cells=_env_int("BIFROST_CHART_MAX_CELLS", 250_000),
+            table_max_rows=_env_int("BIFROST_TABLE_MAX_ROWS", 20_000),
         )
 
 

@@ -39,6 +39,7 @@ from . import approvals, auth, policy, prompts, questions, transcript
 logger = logging.getLogger("bifrost.agent")
 
 from .. import engine
+from ..charts import build_chart_payload
 from ..config import CONFIG
 
 _REPO_ROOT = CONFIG.repo_root
@@ -297,52 +298,26 @@ class AgentSession:
     def _handle_show_chart(self, args: dict[str, Any]) -> str:
         """Publish a chart for the transcript to draw.
 
-        Series are truncated to the x axis and to a sane point count. An 8,760-point
-        line through an SSE frame and into a browser is a slow way to show a shape
-        the eye reads at a few hundred points, and a mismatched x/y length renders as
-        a silently wrong chart rather than an error.
+        Shaping (alignment of gaps, the point budget, thinning that keeps peaks)
+        lives in :mod:`bifrost.charts`; this only publishes the result and tells
+        the agent what happened, including when its data was thinned.
         """
-        MAX_POINTS = 2000
-        x = [str(v) for v in (args.get("x") or [])][:MAX_POINTS]
-        series: list[dict[str, Any]] = []
-        for raw in args.get("series") or []:
-            if not isinstance(raw, dict):
-                continue
-            values = [
-                float(v) for v in (raw.get("values") or [])
-                if isinstance(v, (int, float))
-            ][: len(x)]
-            if not values:
-                continue
-            entry: dict[str, Any] = {
-                "name": str(raw.get("name") or "series"), "values": values,
-            }
-            # A price in $/MWh on the same axis as dispatch in MW makes one of them
-            # invisible, so a series can opt out onto the right-hand axis — and opt
-            # out of the stack, since stacking a price is meaningless.
-            if str(raw.get("axis") or "").lower() == "right":
-                entry["axis"] = "right"
-            if raw.get("kind"):
-                entry["kind"] = str(raw["kind"])
-            series.append(entry)
-        if not x or not series:
-            return "Not drawn: a chart needs an x axis and at least one series with numbers."
-        payload = {
-            "conversationId": self.conversation_id,
-            "chartId": uuid.uuid4().hex[:12],
-            "title": str(args.get("title") or ""),
-            # `chartKind`, not `kind`: the event envelope already uses `kind` for
-            # the event name, and overloading it made the chart type unreadable.
-            "chartKind": str(args.get("kind") or "line"),
-            "unit": str(args.get("unit") or ""),
-            "unitRight": str(args.get("unitRight") or ""),
-            "stacked": bool(args.get("stacked")),
-            "note": str(args.get("note") or ""),
-            "x": x,
-            "series": series,
-        }
+        payload = build_chart_payload(
+            args,
+            conversation_id=self.conversation_id,
+            max_points=CONFIG.chart_max_points,
+            max_cells=CONFIG.chart_max_cells,
+        )
+        if isinstance(payload, str):
+            return payload
         self._publish("chart.show", payload)
-        return f"Drawn: {payload['title']} ({len(series)} series, {len(x)} points)."
+        drawn = f"Drawn: {payload['title']} ({len(payload['series'])} series, {len(payload['x'])} points)."
+        if payload.get("thinnedFrom"):
+            drawn += (
+                f" Thinned from {payload['thinnedFrom']} points keeping each stretch's peak "
+                "and trough; the user can zoom, but cannot see the thinned-out points."
+            )
+        return drawn
 
     async def _handle_ask_user(self, args: dict[str, Any]) -> str:
         """Hand a decision to the user: publish an option card, await the answer.
@@ -686,7 +661,14 @@ def _sdk_backend(session: AgentSession) -> AgentBackend:
                         "type": "object",
                         "properties": {
                             "name": {"type": "string"},
-                            "values": {"type": "array", "items": {"type": "number"}},
+                            "values": {
+                                "type": "array", "items": {"type": ["number", "null"]},
+                                "description": "One number per x; null for a gap (keeps its place).",
+                            },
+                            "color": {
+                                "type": "string",
+                                "description": "Optional CSS colour, e.g. the carrier's own colour.",
+                            },
                             "axis": {
                                 "type": "string", "enum": ["left", "right"],
                                 "description": (

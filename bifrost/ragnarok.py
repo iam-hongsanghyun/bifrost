@@ -118,13 +118,116 @@ class RagnarokClient:
             "GET", "/api/session/meta", params={"session_id": self.session_id}
         )
 
-    async def journal(self, limit: int | None = None) -> dict[str, Any]:
+    async def journal(
+        self, limit: int | None = None, before: int | None = None
+    ) -> dict[str, Any]:
         """The mutation timeline. Bifrost does not keep its own — Ragnarok
-        journals every mutation at the store facade, whoever made it."""
+        journals every mutation at the store facade, whoever made it.
+
+        ``before`` pages backwards: entries with an id below it.
+        """
         params: dict[str, Any] = {"session_id": self.session_id}
         if limit is not None:
             params["limit"] = limit
+        if before is not None:
+            params["before"] = before
         return await self._request("GET", "/api/session/journal", params=params)
+
+    async def journal_diff(self, entry_id: int) -> dict[str, Any]:
+        """The detailed (capped) diff of one journal entry."""
+        return await self._request(
+            "GET",
+            f"/api/session/journal/{int(entry_id)}/diff",
+            params={"session_id": self.session_id},
+        )
+
+    # ── reads that back the State panel ───────────────────────────────────────
+    # Each is one Ragnarok route, passed through unshaped; the shaping lives in
+    # ``bifrost.state`` so it can be tested without a transport.
+    async def model_static(self) -> dict[str, Any]:
+        """The working model's STATIC sheets ``{sheet: rows}`` (series omitted).
+
+        ``{"model": null}`` when nothing is loaded.
+        """
+        return await self._request(
+            "GET",
+            "/api/session/model/full",
+            params={"session_id": self.session_id, "staticOnly": "true"},
+        )
+
+    async def sheet(
+        self, name: str, offset: int = 0, limit: int | None = None
+    ) -> dict[str, Any]:
+        """One page of a session sheet (static or series)."""
+        params: dict[str, Any] = {"session_id": self.session_id, "offset": offset}
+        if limit is not None:
+            params["limit"] = limit
+        return await self._request("GET", f"/api/session/sheet/{name}", params=params)
+
+    async def queue(self) -> dict[str, Any]:
+        """The solve queue: ``{jobs, concurrency, maxConcurrency, cpuCount}``."""
+        return await self._request("GET", "/api/queue")
+
+    async def enqueue(
+        self, scenario: dict[str, Any] | None = None, options: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """Queue a solve of the session's model. Ragnarok snapshots the model now."""
+        return await self._request(
+            "POST",
+            "/api/queue",
+            json={
+                "sessionId": self.session_id,
+                "scenario": scenario or {},
+                "options": options or {},
+            },
+        )
+
+    async def cancel_job(self, item_id: str) -> dict[str, Any]:
+        return await self._request("POST", f"/api/queue/{item_id}/cancel")
+
+    async def runs(self) -> dict[str, Any]:
+        """Every stored run's lightweight meta, newest first."""
+        return await self._request("GET", "/api/runs")
+
+    async def run_analytics(self, name: str) -> dict[str, Any]:
+        """A run's analytics bundle (no input model, no raw series)."""
+        return await self._request("GET", f"/api/runs/{name}/analytics")
+
+    async def run_kpis(self, name: str) -> dict[str, Any]:
+        return await self._request("GET", f"/api/runs/{name}/kpis")
+
+    async def run_series(
+        self, name: str, sheet: str, *, start: int = 0, end: int | None = None,
+        columns: list[str] | None = None, max_points: int | None = None,
+    ) -> dict[str, Any]:
+        """A windowed (and optionally downsampled) slice of one output sheet."""
+        params: dict[str, Any] = {"start": start}
+        if end is not None:
+            params["end"] = end
+        if columns:
+            params["columns"] = ",".join(columns)
+        if max_points is not None:
+            params["maxPoints"] = max_points
+        return await self._request("GET", f"/api/runs/{name}/series/{sheet}", params=params)
+
+    async def run_model_sheet(
+        self, name: str, sheet: str, offset: int = 0, limit: int = 5000
+    ) -> dict[str, Any]:
+        """A sheet of the model a run was SOLVED on (not the session's current one)."""
+        return await self._request(
+            "GET",
+            f"/api/runs/{name}/model/sheet/{sheet}",
+            params={"offset": offset, "limit": limit},
+        )
+
+    async def compare_runs(
+        self, names: list[str], topics: list[str] | None = None
+    ) -> dict[str, Any]:
+        """Ragnarok's comparison matrix data for 2 to 5 runs."""
+        params: dict[str, Any] = {"runs": ",".join(names)}
+        if topics:
+            params["topics"] = ",".join(topics)
+        return await self._request("GET", "/api/results/compare", params=params)
 
     # ── project packages: a conversation's whole world ────────────────────────
     async def export_project(

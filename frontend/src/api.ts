@@ -53,7 +53,9 @@ export interface ChatEvent {
   title?: string;
   chartKind?: string;
   x?: string[];
-  series?: { name: string; values: number[]; axis?: string; kind?: string }[];
+  series?: { name: string; values: (number | null)[]; axis?: string; kind?: string; color?: string }[];
+  /** Set when the server thinned the chart: the number of points the agent sent. */
+  thinnedFrom?: number;
   unit?: string;
   /** Secondary axis label — price in $/MWh against dispatch in MW. */
   unitRight?: string;
@@ -370,4 +372,270 @@ export const engineApi = {
   stop: () => fetch('/api/engine/stop', { method: 'POST' })
     .then(json<{ stopped: boolean; reason: string } & EngineProcessStatus>),
   log: (lines = 60) => fetch(`/api/engine/log?lines=${lines}`).then(json<{ lines: string[] }>),
+};
+
+// ── the State panel: live model, journal, queue, runs, results ──────────────
+// Every route is Bifrost's own (`/api/state/*`); the browser never calls the
+// engine for these. Keys carry their units (`capacity_mw`) and match
+// bifrost/state.py one for one.
+
+export interface ListResponse<T> {
+  items: T[];
+  total: number;
+}
+
+export interface ModelCount {
+  sheet: string;
+  label: string;
+  count: number;
+  /** bus | branch (joins two buses) | attached (hangs off one bus) | other */
+  role: 'bus' | 'branch' | 'attached' | 'other';
+  columns: string[];
+}
+
+export interface ModelCarrier {
+  name: string;
+  nice_name: string;
+  color: string;
+  co2_emissions_t_per_mwh_th: number | null;
+  asset_count: number;
+}
+
+export interface TopologyAsset {
+  sheet: string;
+  name: string;
+  carrier: string;
+  p_nom_mw: number | null;
+}
+
+export interface TopologyBus {
+  name: string;
+  x: number | null;
+  y: number | null;
+  v_nom_kv: number | null;
+  carrier: string;
+  assets: TopologyAsset[];
+  assets_total: number;
+}
+
+export interface TopologyBranch {
+  sheet: string;
+  name: string;
+  bus0: string;
+  bus1: string;
+  capacity_mw: number | null;
+  carrier: string;
+}
+
+export interface StateModel {
+  loaded: boolean;
+  version: number | null;
+  filename?: string;
+  snapshot_count?: number | null;
+  snapshot_start?: string | null;
+  snapshot_end?: string | null;
+  series_sheets?: { name: string; rows: number | null; columns: string[] }[];
+  counts: ModelCount[];
+  carriers: ModelCarrier[];
+  topology: {
+    buses: TopologyBus[];
+    branches: TopologyBranch[];
+    has_coordinates: boolean;
+    unattached: number;
+  };
+}
+
+export type CellValue = string | number | boolean | null;
+
+export interface TablePage {
+  sheet: string;
+  kind: string;
+  columns: string[];
+  /** The first column plus those whose value differs between rows. */
+  key_columns: string[];
+  items: Record<string, CellValue>[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
+export interface JournalSheetChange {
+  name: string;
+  kind: string;
+  rowsBefore: number | null;
+  rowsAfter: number | null;
+  added?: boolean;
+}
+
+export interface JournalEntry {
+  id: number;
+  version: number;
+  ts: string;
+  actor: string;
+  origin: { endpoint?: string; requestId?: string; conversationId?: string | null };
+  kind: string;
+  sheets: JournalSheetChange[];
+  summary: string;
+  undo?: { strategy: string };
+  hasDetail: boolean;
+}
+
+export interface JournalPage extends ListResponse<JournalEntry> {
+  version: number | null;
+  next_before: number | null;
+}
+
+export interface JournalDiff {
+  id: number;
+  kind: string;
+  summary: string;
+  detail: {
+    cellDiffs?: { row: number; column: string; before: CellValue; after: CellValue }[];
+    truncated?: boolean;
+    [key: string]: unknown;
+  };
+  undoStrategy?: string;
+}
+
+export interface QueueJob {
+  id: string;
+  label: string;
+  status: 'queued' | 'staged' | 'running' | 'done' | 'error' | 'cancelled';
+  submittedAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  error: string | null;
+  runName: string | null;
+  cores: number | null;
+  elapsed_s: number | null;
+}
+
+export interface QueueState extends ListResponse<QueueJob> {
+  active: number;
+  concurrency: number | null;
+  max_concurrency: number | null;
+}
+
+export interface RunMeta {
+  name: string;
+  label: string;
+  saved_at: string | null;
+  origin: string;
+  filename: string;
+  snapshot_start: string | null;
+  snapshot_end: string | null;
+  component_counts: Record<string, number>;
+  summary: { label: string; value: string }[];
+  size_bytes: number | null;
+}
+
+export interface Kpi {
+  key: string;
+  label: string;
+  value: number | null;
+  unit: string;
+  text: string | null;
+}
+
+export interface NamedSeries {
+  name: string;
+  values: (number | null)[];
+  color?: string;
+}
+
+export interface CategoryChart {
+  categories: string[];
+  series: NamedSeries[];
+}
+
+export interface Dashboard {
+  run: string;
+  label: string;
+  saved_at: string | null;
+  origin: string;
+  kpis: Kpi[];
+  summary: { label: string; value: string; detail?: string }[];
+  snapshot_count: number;
+  stride: number;
+  periods: string[];
+  buses: string[];
+  carriers: string[];
+  selected: { bus: string | null; carrier: string | null; period: string | null };
+  x: string[];
+  /** Index of each x in the run's full snapshot order (the drill-in key). */
+  snapshot_index: number[];
+  dispatch_mw: { series: NamedSeries[]; load_mw: (number | null)[] | null };
+  price: { series: NamedSeries[]; currency: string };
+  curtailment_mw: { series: NamedSeries[] };
+  emissions_tco2e: { values: (number | null)[] };
+  storage: {
+    soc_mwh: NamedSeries[];
+    flow_mw: { charge: (number | null)[]; discharge: (number | null)[] } | null;
+  };
+  capacity_mw: CategoryChart;
+  expansion: { name: string; component: string; carrier: string; bus: string;
+               p_nom_mw: number; p_nom_opt_mw: number; delta_mw: number }[];
+  emissions_by_carrier: CategoryChart;
+  cost_breakdown: { label: string; value: number | null }[];
+  carrier_mix: { name: string; energy_mwh: number | null; color?: string }[];
+  line_loading: { name: string; loading_pct: number | null }[];
+  bus_filter_note: string | null;
+}
+
+export interface SnapshotDrill {
+  index: number;
+  label: string;
+  bus: string | null;
+  by_carrier: { name: string; p_mw: number; color?: string }[];
+  by_asset: { name: string; carrier: string; bus: string; p_mw: number }[];
+  by_bus: { bus: string; price: number | null; generation_mw: number | null }[];
+  load_mw: number | null;
+  flows: { name: string; p0_mw: number | null }[];
+}
+
+export interface Comparison {
+  runs: { name: string; label: string; saved_at: string | null }[];
+  kpis: { key: string; label: string; unit: string; values: (number | null)[];
+          text: (string | null)[]; delta: (number | null)[]; delta_pct: (number | null)[] }[];
+  generation_mwh: CategoryChart;
+  capacity_mw: CategoryChart;
+  cost: CategoryChart;
+  price: { name: string; x: string[]; values: (number | null)[] }[];
+}
+
+const jsonBody = (body: unknown): RequestInit => ({
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(body),
+});
+
+const qs = (params: Record<string, string | number | boolean | null | undefined>): string => {
+  const q = new URLSearchParams();
+  Object.entries(params).forEach(([k, v]) => {
+    if (v !== null && v !== undefined && v !== '') q.set(k, String(v));
+  });
+  const text = q.toString();
+  return text ? `?${text}` : '';
+};
+
+export const stateApi = {
+  model: () => fetch('/api/state/model').then(json<StateModel>),
+  sheet: (name: string, p: { q?: string; sort?: string; desc?: boolean; offset?: number; limit?: number }) =>
+    fetch(`/api/state/sheet/${encodeURIComponent(name)}${qs(p)}`).then(json<TablePage>),
+  journal: (limit = 100, before?: number) =>
+    fetch(`/api/state/journal${qs({ limit, before })}`).then(json<JournalPage>),
+  journalDiff: (id: number) => fetch(`/api/state/journal/${id}/diff`).then(json<JournalDiff>),
+  queue: () => fetch('/api/state/queue').then(json<QueueState>),
+  solve: (scenario: Record<string, unknown> = {}, options: Record<string, unknown> = {}) =>
+    fetch('/api/state/queue', jsonBody({ scenario, options })).then(
+      json<{ id: string; status: string; position: number }>),
+  cancel: (id: string) =>
+    fetch(`/api/state/queue/${encodeURIComponent(id)}/cancel`, { method: 'POST' }).then(json<Record<string, unknown>>),
+  runs: () => fetch('/api/state/runs').then(json<ListResponse<RunMeta>>),
+  dashboard: (run: string, p: { bus?: string | null; carrier?: string | null; period?: string | null }) =>
+    fetch(`/api/state/runs/${encodeURIComponent(run)}/dashboard${qs(p)}`).then(json<Dashboard>),
+  snapshot: (run: string, index: number, bus?: string | null) =>
+    fetch(`/api/state/runs/${encodeURIComponent(run)}/snapshot${qs({ index, bus })}`).then(json<SnapshotDrill>),
+  compare: (runs: string[]) =>
+    fetch(`/api/state/compare${qs({ runs: runs.join(',') })}`).then(json<Comparison>),
 };

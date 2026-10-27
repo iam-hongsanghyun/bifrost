@@ -57,7 +57,7 @@ READ_ONLY = {
     "get_plugin", "refresh_plugins", "list_plugin_files", "get_plugin_options",
     "list_tab_modules", "pypsa_earth_status", "pypsa_earth_build_status",
     "list_scenarios", "describe_scenario", "list_report_perspectives", "get_report",
-    "compare_runs", "get_kpis", "compare_companies", "get_asset_details",
+    "compare_runs", "compare_run_statistics", "get_kpis", "compare_companies", "get_asset_details",
     "get_statistics", "network_analysis", "consistency_check",
     "list_conversions", "pypsa_io_capabilities", "describe_piecewise",
     "get_piecewise_curve", "check_piecewise_options", "describe_optimise_options",

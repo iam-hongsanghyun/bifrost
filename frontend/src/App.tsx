@@ -10,7 +10,7 @@
  * switch. Remounting would reload Ragnarok — losing its scroll, its open sheet and
  * its map viewport every time the user glanced at the chat.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   api, ChatEvent, ClientConfig, Conversation, ConversationGroup, EngineInfo, engineApi, Health,
   subscribeChat, subscribeEngine, UploadedFile,
@@ -19,10 +19,26 @@ import { AgentControls } from './components/AgentControls';
 import { ChatPane } from './components/ChatPane';
 import { ConversationRail } from './components/ConversationRail';
 import { EngineSetup } from './components/EngineSetup';
+import { SplitPane } from './components/state/SplitPane';
+import { PinnedChart, StateCommand, StatePanel } from './components/state/StatePanel';
+import { specFor } from './lib/chartEvents';
+import { useStateData } from './lib/useStateData';
+import { loadBlob, saveBlob, useMediaQuery } from './lib/useResource';
 import { attachmentBlockFor } from './lib/attachments';
 import { isWorkingState } from './lib/toolLabels';
 
 type Tab = 'conversation' | 'ragnarok';
+
+/** Layout the user chose, kept across reloads. Versioned: see loadBlob. */
+const LAYOUT_KEY = 'bifrost.layout';
+const LAYOUT_VERSION = 1;
+const PINS_KEY = 'bifrost.pins';
+const PINS_VERSION = 1;
+const PANEL_DEFAULT_PX = 560;
+const PANEL_MIN_PX = 340;
+/** At or below this the State panel is a drawer over the chat, not a column beside it. */
+const NARROW_QUERY = '(max-width: 960px)';
+const RAIL_NARROW_QUERY = '(max-width: 720px)';
 
 export default function App() {
   const [tab, setTab] = useState<Tab>('conversation');
@@ -40,12 +56,70 @@ export default function App() {
   // showing the chat first would only offer a conversation that cannot do anything.
   const [showSetup, setShowSetup] = useState(false);
 
+  // ── layout: the State panel beside the chat ─────────────────────────────
+  const narrow = useMediaQuery(NARROW_QUERY);
+  const railNarrow = useMediaQuery(RAIL_NARROW_QUERY);
+  const saved = useRef(loadBlob(LAYOUT_KEY, LAYOUT_VERSION, { open: true, width: PANEL_DEFAULT_PX }));
+  const [panelOpenWide, setPanelOpenWide] = useState(saved.current.open);
+  const [panelOpenNarrow, setPanelOpenNarrow] = useState(false);
+  const [panelWidth, setPanelWidth] = useState(saved.current.width);
+  const [railOpen, setRailOpen] = useState(false);
+  const panelOpen = narrow ? panelOpenNarrow : panelOpenWide;
+  const setPanelOpen = (open: boolean) => (narrow ? setPanelOpenNarrow(open) : setPanelOpenWide(open));
+  useEffect(() => {
+    saveBlob(LAYOUT_KEY, LAYOUT_VERSION, { open: panelOpenWide, width: panelWidth });
+  }, [panelOpenWide, panelWidth]);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const maxPanel = () => Math.max(PANEL_MIN_PX, Math.round((bodyRef.current?.clientWidth ?? 1200) * 0.7));
+
+  // ── the State panel's data, the pins, and the links to and from the chat ──
+  const [command, setCommand] = useState<StateCommand | null>(null);
+  const [focusStep, setFocusStep] = useState<{ callId: string; nonce: number } | null>(null);
+  const [pinIds, setPinIds] = useState<string[]>(() => loadBlob<string[]>(PINS_KEY, PINS_VERSION, []));
+  useEffect(() => saveBlob(PINS_KEY, PINS_VERSION, pinIds), [pinIds]);
+
   // The transcript is persisted as it grows, not only on close — a crashed tab
   // must not cost the conversation. Kept in a ref so the debounce does not need
   // `events` as a dependency and restart the timer on every token.
   const frameRef = useRef<HTMLIFrameElement>(null);
   const eventsRef = useRef<ChatEvent[]>([]);
   eventsRef.current = events;
+
+  const stateData = useStateData(tab === 'conversation' && panelOpen && !showSetup, engineVersion);
+  // Pins are stored as chart ids only; the data is whatever the transcript holds.
+  // A pin whose chart is no longer in this conversation simply is not shown.
+  const pinned = useMemo<PinnedChart[]>(() => {
+    const byId = new Map<string, PinnedChart>();
+    events.forEach((e) => {
+      if (e.kind === 'chart.show' && e.chartId && e.x && e.series && pinIds.includes(e.chartId)) {
+        byId.set(e.chartId, { id: e.chartId, spec: specFor(e) });
+      }
+    });
+    return pinIds.flatMap((id) => (byId.has(id) ? [byId.get(id) as PinnedChart] : []));
+  }, [events, pinIds]);
+  const callOf = useMemo(() => {
+    const map = new Map<number, string>();
+    events.forEach((e) => {
+      if (e.kind === 'tool.end' && e.callId) (e.journalEntryIds ?? []).forEach((id) => map.set(id, e.callId as string));
+    });
+    return map;
+  }, [events]);
+  const togglePin = (chartId: string) => {
+    setPinIds((ids) => (ids.includes(chartId) ? ids.filter((i) => i !== chartId) : [...ids, chartId]));
+  };
+  const openJournal = (ids: number[]) => {
+    setPanelOpen(true);
+    setCommand({ tab: 'changes', journalIds: ids, nonce: Date.now() });
+  };
+  const showStep = (callId: string) => {
+    if (narrow) setPanelOpenNarrow(false);
+    setFocusStep({ callId, nonce: Date.now() });
+  };
+  useEffect(() => {
+    if (!focusStep) return undefined;
+    const timer = window.setTimeout(() => setFocusStep(null), 2600);
+    return () => window.clearTimeout(timer);
+  }, [focusStep]);
 
   const refreshRail = useCallback(async () => {
     const { groups: next } = await api.listConversations();
@@ -116,7 +190,12 @@ export default function App() {
         setBusy(isWorkingState((data as unknown as { state?: string }).state));
         return;
       }
-      setEvents((prev) => [...prev, data]);
+      // A reconnecting stream replays what it missed, and a replayed chart would be
+      // drawn twice under one id (and one React key). A chart id is unique per draw.
+      setEvents((prev) => (
+        data.kind === 'chart.show' && data.chartId && prev.some((e) => e.kind === 'chart.show' && e.chartId === data.chartId)
+          ? prev : [...prev, data]
+      ));
     });
   }, [config]);
 
@@ -285,6 +364,9 @@ export default function App() {
     <div className="app">
       <header className="topbar">
         <span className="brand">Bifrost</span>
+        {railNarrow && tab === 'conversation' && (
+          <button className="btn-ghost sm" aria-pressed={railOpen} onClick={() => setRailOpen((o) => !o)}>Conversations</button>
+        )}
         <div className="tabs" role="tablist">
           <button role="tab" aria-selected={tab === 'conversation'}
             className={`tab${tab === 'conversation' ? ' is-active' : ''}`}
@@ -303,6 +385,12 @@ export default function App() {
             )}
           </button>
         </div>
+        {tab === 'conversation' && (
+          <button className={`btn-ghost sm state-toggle${panelOpen ? ' is-on' : ''}`} aria-pressed={panelOpen}
+            onClick={() => setPanelOpen(!panelOpen)} title="Show or hide the live State panel">
+            State
+          </button>
+        )}
         <span className="topbar-right muted">
           {config && (
             <AgentControls sessionId={config.sessionId} busy={busy} onError={setError} />
@@ -327,20 +415,24 @@ export default function App() {
         </div>
       )}
 
-      <main className="body">
-        <div className={`pane${tab === 'conversation' ? '' : ' is-hidden'}`}>
+      <main className="body" ref={bodyRef}>
+        <div className={`pane${tab === 'conversation' ? '' : ' is-hidden'}`}
+          style={{ '--state-w': `${Math.min(panelWidth, maxPanel())}px` } as React.CSSProperties}>
+          {(!railNarrow || railOpen) && (
           <ConversationRail
+            overlay={railNarrow}
             groups={groups}
             activeId={activeId}
             engineVersion={engineVersion}
             busy={busy}
-            onSelect={(id) => void select(id)}
+            onSelect={(id) => { setRailOpen(false); void select(id); }}
             onCreate={() => void create()}
             onRename={(c) => void rename(c)}
             onRegroup={(c) => void regroup(c)}
             onDelete={(c) => void remove(c)}
             onSnapshot={(c) => void snapshot(c)}
           />
+          )}
           <ChatPane
             events={events}
             streaming={streaming}
@@ -357,11 +449,29 @@ export default function App() {
                 setError(e instanceof Error ? e.message : 'Could not send that answer.'));
             }}
             onShowInRagnarok={showInRagnarok}
+            pinnedIds={new Set(pinIds)}
+            onTogglePin={togglePin}
+            onOpenJournal={openJournal}
+            focusStep={focusStep}
             onDecideApproval={(id, decision) => {
               void api.decideApproval(id, decision).catch((e) =>
                 setError(e instanceof Error ? e.message : 'Could not send that decision.'));
             }}
           />
+          {panelOpen && !narrow && (
+            <SplitPane width={Math.min(panelWidth, maxPanel())} min={PANEL_MIN_PX} max={maxPanel()}
+              onChange={setPanelWidth} onReset={() => setPanelWidth(PANEL_DEFAULT_PX)} />
+          )}
+          {panelOpen && (
+            <div className={`state-wrap${narrow ? ' is-overlay' : ''}`}>
+              <StatePanel data={stateData} engineVersion={engineVersion} command={command}
+                callOf={callOf} onFocusStep={showStep} pinned={pinned}
+                onUnpin={togglePin} onCollapse={() => setPanelOpen(false)} />
+            </div>
+          )}
+          {!panelOpen && !narrow && (
+            <button className="state-handle" onClick={() => setPanelOpen(true)} title="Show the State panel">State</button>
+          )}
         </div>
 
         {/* Mounted once, hidden on the other tab — remounting would reload

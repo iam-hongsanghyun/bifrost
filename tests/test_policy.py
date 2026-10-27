@@ -40,7 +40,7 @@ def test_the_tiers_are_disjoint() -> None:
 
 
 def test_every_engine_tool_is_classified_and_none_is_stale() -> None:
-    assert len(NAMES) == 154
+    assert len(NAMES) == 155
     assert sorted(NAMES - policy.CLASSIFIED) == [], "engine tools the policy has never heard of"
     assert sorted(policy.CLASSIFIED - NAMES) == [], "policy names that no longer exist"
 

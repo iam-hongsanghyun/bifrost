@@ -70,6 +70,40 @@ whatever route — then publishes a `session.version` event. So:
 - `tool.end` events carry the journal entry ids a tool produced, so the chat can show
   what each step actually changed
 
+## The State panel
+
+Beside the chat (a draggable, collapsible split; a drawer on narrow screens) is a live
+view of what the agent is working on, so you do not have to ask it what state things are in:
+
+| Section | Shows | Live because |
+|---|---|---|
+| Model | component counts (click for the sortable, filterable table), carriers, a clickable network map (click a bus for its assets, an asset for its row) | Ragnarok's `session.version` event refetches it |
+| Changes | the journal as a timeline with cell-level diffs; each change links to the chat step that made it (`tool.end` carries the journal ids) and the chat links back | same |
+| Runs | the solve queue (status and a live timer; Ragnarok reports no percentage, so none is invented), stored runs, a Solve button, pick up to five to compare | the queue is polled: 1.5 s while a job is active, 6 s otherwise, never while the tab is hidden |
+| Results | KPIs, dispatch stack, prices by bus, price heatmap, capacity, storage, curtailment, emissions, cost; bus / carrier / period selectors; click a time point for that snapshot's dispatch; compare runs | a finished solve is selected automatically |
+| Pinned | charts pinned from the transcript | stored as chart ids in `localStorage` (`bifrost.pins`, versioned) |
+
+The browser never calls Ragnarok for any of this: every read goes through `/api/state/*`
+(`bifrost/state_router.py`), which does one or two fetches and hands the JSON to
+`bifrost/state.py` to shape (columns for charts, numbers for KPIs, `{items, total}` for lists).
+The routes: `GET /model`, `/sheet/{name}`, `/journal`, `/journal/{id}/diff`, `/queue`, `/runs`,
+`/runs/{run}/dashboard`, `/runs/{run}/snapshot`, `/compare`; `POST /queue`, `/queue/{id}/cancel`.
+
+### Charts
+
+One component (`frontend/src/components/Chart.tsx`, logic in `lib/chartModel.ts`) draws every
+chart, in the transcript, the panel and full screen: hover tooltip with every series at the
+hovered x, wheel / slider / box zoom with reset, legend click to hide and double-click to
+isolate, line / area / stacked area / bar / stacked bar, duration curve, log y, full screen,
+PNG and CSV export, click a point to break it down, pin to the panel. It resizes with its
+container and follows the page's theme. The agent's `show_chart` payload is shaped by
+`bifrost/charts.py`: a missing value is a gap that keeps its place, a year of hourly points
+is no longer cut to 2,000, and only past `BIFROST_CHART_MAX_CELLS` is a chart thinned, with
+indices shared by every series so peaks survive and stacks still add up.
+
+Tunables (environment): `BIFROST_CHART_MAX_POINTS` (10000), `BIFROST_CHART_MAX_CELLS`
+(250000, the most the browser draws), `BIFROST_TABLE_MAX_ROWS` (20000).
+
 ## Layout
 
 ```
@@ -77,6 +111,9 @@ bifrost/          application code
   main.py         FastAPI: agent + conversations + config
   config.py       every tunable from the environment
   ragnarok.py     the HTTP client, with a transport seam for in-process tests
+  state.py        shapes Ragnarok's model / journal / runs for the State panel (pure)
+  state_router.py /api/state/*: thin fetches, then state.py
+  charts.py       show_chart arguments -> chart.show payload (pure)
   agent/          Claude Agent SDK host (status, chat, approvals, questions, files…)
   conversations/  store + router
 tests/            mirrors bifrost/
@@ -129,7 +166,7 @@ catalogue and fails when the approval policy has fallen behind it.
 
 ## The agent's tools and who approves them
 
-The agent's whole toolset is Ragnarok's MCP server (`python -m backend.mcp`, 154 tools at
+The agent's whole toolset is Ragnarok's MCP server (`python -m backend.mcp`, 155 tools at
 the time of writing), launched by the SDK from the **chosen checkout, on that checkout's own
 interpreter**. Two gates exist for a mutating tool, and they must not stack:
 

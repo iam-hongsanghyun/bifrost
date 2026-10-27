@@ -45,10 +45,12 @@ app.add_middleware(
 from .agent import router as _agent_router  # noqa: E402
 from .conversations.router import router as _conversations_router  # noqa: E402
 from .engine_router import router as _engine_router  # noqa: E402
+from .state_router import router as _state_router  # noqa: E402
 
 app.include_router(_agent_router.router)
 app.include_router(_conversations_router)
 app.include_router(_engine_router)
+app.include_router(_state_router)
 
 
 @app.get("/api/events")

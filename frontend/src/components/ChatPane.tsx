@@ -13,12 +13,13 @@
  * hidden outright — when the agent spends ten steps looking for a tool, the user
  * deserves to see that time went somewhere.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChatEvent, UploadedFile } from '../api';
 import { prettyBytes } from '../lib/attachments';
 import { describeTool, describeToolDone, humanSummary, isPlumbing } from '../lib/toolLabels';
 import { Markdown } from '../lib/markdown';
 import { Chart, ChartSpec } from './Chart';
+import { specFor } from '../lib/chartEvents';
 
 interface Props {
   events: ChatEvent[];
@@ -35,6 +36,13 @@ interface Props {
   onDecideApproval: (approvalId: string, decision: 'allow' | 'deny') => void;
   /** Switch to the Ragnarok tab and point it at what the agent named. */
   onShowInRagnarok: (event: ChatEvent) => void;
+  /** Chart ids kept in the State panel, and how to keep or drop one. */
+  pinnedIds: ReadonlySet<string>;
+  onTogglePin: (chartId: string) => void;
+  /** Show these journal entries in the State panel's Changes timeline. */
+  onOpenJournal: (ids: number[]) => void;
+  /** A change in the timeline asked to see the step that made it. */
+  focusStep: { callId: string; nonce: number } | null;
 }
 
 /** Chips for what the user handed over, on their own message and on a settled card. */
@@ -57,7 +65,7 @@ type Row =
   | { kind: 'plumbing'; count: number; key: string }
   | { kind: 'question'; event: ChatEvent; answered: string | null; key: string }
   | { kind: 'approval'; event: ChatEvent; decided: string | null; key: string }
-  | { kind: 'chart'; spec: ChartSpec; key: string }
+  | { kind: 'chart'; spec: ChartSpec; key: string; chartId: string }
   | { kind: 'assumption'; event: ChatEvent; key: string }
   | { kind: 'show'; event: ChatEvent; key: string };
 
@@ -71,6 +79,11 @@ type Row =
 function toRows(events: ChatEvent[]): Row[] {
   const rows: Row[] = [];
   const toolRowIndex = new Map<string, number>();
+  // tool.end carries no tool name (only the call id and what it changed), so the
+  // name has to come from its tool.start. Without it every end was classed as
+  // plumbing and dropped: no tool row ever finished, and no change count showed.
+  const startOf = new Map<string, ChatEvent>();
+  events.forEach((e) => { if (e.kind === 'tool.start' && e.callId) startOf.set(e.callId, e); });
 
   // A resolved question or approval must render as settled, not as a live card the
   // user could answer twice — the agent has already moved on.
@@ -97,20 +110,8 @@ function toRows(events: ChatEvent[]): Row[] {
       return;
     }
     if (event.kind === 'chart.show' && event.x && event.series) {
-      rows.push({
-        kind: 'chart', key: `chart-${event.chartId ?? index}`,
-        spec: {
-          chartId: event.chartId,
-          title: event.title,
-          kind: event.chartKind,
-          unit: event.unit,
-          unitRight: event.unitRight,
-          stacked: event.stacked,
-          note: event.note,
-          x: event.x,
-          series: event.series,
-        },
-      });
+      const chartId = event.chartId ?? `idx-${index}`;
+      rows.push({ kind: 'chart', key: `chart-${chartId}`, chartId, spec: specFor(event) });
       return;
     }
     if (event.kind === 'show.request') {
@@ -124,8 +125,9 @@ function toRows(events: ChatEvent[]): Row[] {
     // The resolutions themselves are folded into the card above.
     if (event.kind === 'question.resolved' || event.kind === 'approval.resolved') return;
     const isTool = event.kind === 'tool.start' || event.kind === 'tool.end';
+    const tool = event.tool ?? (event.callId ? startOf.get(event.callId)?.tool : undefined);
 
-    if (isTool && isPlumbing(event.tool)) {
+    if (isTool && isPlumbing(tool)) {
       // Only count starts, or every call would be counted twice.
       if (event.kind !== 'tool.start') return;
       const last = rows[rows.length - 1];
@@ -138,7 +140,7 @@ function toRows(events: ChatEvent[]): Row[] {
       const id = event.callId ?? `tool-${index}`;
       const existing = toolRowIndex.get(id);
       if (existing !== undefined && event.kind === 'tool.end') {
-        rows[existing] = { kind: 'tool', event, key: `tool-${id}` };
+        rows[existing] = { kind: 'tool', event: { ...event, tool }, key: `tool-${id}` };
         return;
       }
       if (existing !== undefined) return;
@@ -277,23 +279,29 @@ function ApprovalCard(
   );
 }
 
-function ToolRow({ event }: { event: ChatEvent }) {
+function ToolRow(
+  { event, flash, onOpenJournal }:
+  { event: ChatEvent; flash: boolean; onOpenJournal: (ids: number[]) => void },
+) {
   const done = event.kind === 'tool.end';
   const ok = event.ok !== false;
-  const changed = event.journalEntryIds?.length ?? 0;
+  const ids = event.journalEntryIds ?? [];
+  const changed = ids.length;
   const summary = done ? humanSummary(event.resultSummary) : null;
 
   return (
-    <div className={`tool-row${done ? (ok ? ' is-done' : ' is-error') : ' is-running'}`}>
+    <div data-call-id={event.callId}
+      className={`tool-row${done ? (ok ? ' is-done' : ' is-error') : ' is-running'}${flash ? ' is-flash' : ''}`}>
       <span className="tool-icon" aria-hidden>{done ? (ok ? '✓' : '✕') : '·'}</span>
       <span className="tool-what">
         {done ? describeToolDone(event.tool, ok) : `${describeTool(event.tool)}…`}
       </span>
       {summary && <span className="tool-summary">{summary}</span>}
       {changed > 0 && (
-        <span className="chip" title="Recorded in Ragnarok's change timeline">
+        <button className="chip chip--link" onClick={() => onOpenJournal(ids)}
+          title="Recorded in Ragnarok's change timeline. Click to see what it changed.">
           {changed} {changed === 1 ? 'change' : 'changes'}
-        </span>
+        </button>
       )}
     </div>
   );
@@ -308,7 +316,9 @@ export function ChatPane(props: Props) {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const pickerRef = useRef<HTMLInputElement>(null);
-  const rows = toRows(events);
+  const rows = useMemo(() => toRows(events), [events]);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [flashId, setFlashId] = useState<string | null>(null);
 
   const take = async (picked: File[]) => {
     if (picked.length === 0 || disabled) return;
@@ -324,10 +334,24 @@ export function ChatPane(props: Props) {
     }
   };
 
+  // The change timeline asked for the step that made a change: scroll to it, flash it.
+  useEffect(() => {
+    const target = props.focusStep;
+    if (!target) return undefined;
+    const el = scrollRef.current?.querySelector(`[data-call-id="${CSS.escape(target.callId)}"]`);
+    if (!el) return undefined;
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    setFlashId(target.callId);
+    const timer = window.setTimeout(() => setFlashId(null), 2200);
+    return () => window.clearTimeout(timer);
+  }, [props.focusStep]);
+
   // Follow the tail as it streams. Both move, so both are dependencies —
   // otherwise the view sticks mid-answer.
   useEffect(() => {
+    if (props.focusStep) return; // do not yank the view back while showing a step
     endRef.current?.scrollIntoView({ block: 'end' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows.length, streaming]);
 
   const submit = () => {
@@ -352,7 +376,7 @@ export function ChatPane(props: Props) {
         void take(Array.from(e.dataTransfer.files ?? []));
       }}
     >
-      <div className="chat-scroll">
+      <div className="chat-scroll" ref={scrollRef}>
         {rows.length === 0 && !streaming && (
           <div className="chat-empty">
             <h2>Ask for a model</h2>
@@ -419,8 +443,18 @@ export function ChatPane(props: Props) {
               </button>
             );
           }
-          if (row.kind === 'chart') return <Chart key={row.key} spec={row.spec} />;
-          if (row.kind === 'tool') return <ToolRow key={row.key} event={row.event} />;
+          if (row.kind === 'chart') {
+            return (
+              <Chart key={row.key} spec={row.spec} pinned={props.pinnedIds.has(row.chartId)}
+                onTogglePin={() => props.onTogglePin(row.chartId)} />
+            );
+          }
+          if (row.kind === 'tool') {
+            return (
+              <ToolRow key={row.key} event={row.event} onOpenJournal={props.onOpenJournal}
+                flash={flashId !== null && flashId === row.event.callId} />
+            );
+          }
           const text = row.event.markdown ?? row.event.text ?? '';
           const mine = row.event.role === 'user';
           const attached = row.event.files ?? [];

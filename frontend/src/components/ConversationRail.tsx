@@ -10,6 +10,8 @@
 import { Conversation, ConversationGroup } from '../api';
 
 interface Props {
+  /** Narrow screens: float over the chat instead of sitting beside it. */
+  overlay?: boolean;
   groups: ConversationGroup[];
   activeId: string | null;
   /** Ragnarok's current journal version, or null when nothing is loaded. */
@@ -38,7 +40,7 @@ export function ConversationRail(props: Props) {
   const empty = groups.every((g) => g.conversations.length === 0);
 
   return (
-    <nav className="rail" aria-label="Conversations">
+    <nav className={`rail${props.overlay ? " rail--overlay" : ""}`} aria-label="Conversations">
       <header className="rail-head">
         <span className="rail-title">Conversations</span>
         <button className="btn-ghost" onClick={props.onCreate} disabled={busy} title="New conversation">

@@ -1,315 +1,496 @@
 /**
- * The chart the agent draws in the conversation.
+ * The one chart component: the transcript, the State panel's dashboard and the
+ * full-screen view all render this, so a fix lands everywhere.
  *
- * This was hand-rolled SVG with a hover readout, on the reasoning that Ragnarok
- * already owns an ECharts layer and a second copy costs bundle size. That
- * reasoning does not survive contact with the actual job: a static picture with a
- * hover label is not interactive, and for a year of hourly snapshots it is
- * useless — 8760 points across 660 pixels is 13 hours per pixel, so the shape you
- * need to see is not on screen and there is no way to get to it. Bundle size is
- * also a weak argument for an app served from localhost.
+ * What was wrong with the version this replaces (found by running chart.show
+ * payloads through it in a browser):
  *
- * So: ECharts, pinned to the same major as Ragnarok's so both tabs behave alike.
- * What that buys, all of which matters for power-system output —
- *   - zoom and pan on the time axis (drag the slider, or scroll inside the plot)
- *   - an axis tooltip reading EVERY series at the hovered snapshot, not just one
- *   - legend toggling, to pull one generator out of a crowded dispatch stack
- *   - stacking, because the dispatch stack is the canonical chart of this domain
- *   - a second y axis, for the price series that shares an x with dispatch in MW
- *   - heatmap, for the hour-of-day × day pattern a line chart flattens away
- *
- * Two domain affordances the library does not give for free: a duration-curve
- * toggle (sort each series descending — how a modeller actually reads a load or
- * price series), and PNG export, because these end up in reports.
+ *  - Every streamed token re-rendered the transcript, which rebuilt each chart's
+ *    spec object, which rebuilt the ECharts option and replaced it: zoom and legend
+ *    selection reset mid-answer. Specs are now cached per event, the component is
+ *    memoised, and zoom lives in a ref.
+ *  - Long series were thinned once, in place, to a few thousand min/max pairs, so
+ *    zooming in showed the same points larger and the tooltip's labels no longer
+ *    matched the data. Every point is now drawn (up to a budget of 250,000 values);
+ *    only beyond that is the chart thinned, with shared indices that keep peaks.
+ *  - The legend was a canvas strip that scrolled 9 of 20 entries out of reach, could
+ *    not isolate a series and was reset on every redraw. It is now an HTML legend:
+ *    click toggles, double-click isolates, hover highlights.
+ *  - Resize followed the window only; the split panel resizing left the chart at its
+ *    old size. A ResizeObserver now follows the element.
+ *  - Theme was read once from the OS and its colours were literals. It follows the
+ *    page's own custom properties and re-reads when the scheme changes.
+ *  - Tooltips are HTML and interpolated series names unescaped.
+ *  - A missing value was dropped from a series, shifting the rest against x.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
-// Modular imports, not `import * as echarts`: the whole library is ~1 MB and this
-// chart uses four series types and five components. Type-only imports erase, so
-// EChartsOption costs nothing at runtime.
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { init, use } from 'echarts/core';
 import type { ECharts } from 'echarts/core';
-import type { EChartsOption, SeriesOption } from 'echarts';
 import { BarChart, HeatmapChart, LineChart, ScatterChart } from 'echarts/charts';
 import {
-  DataZoomComponent, GridComponent, LegendComponent, TooltipComponent, VisualMapComponent,
+  DataZoomComponent, GridComponent, MarkLineComponent, TooltipComponent, VisualMapComponent,
 } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
+import {
+  buildOption, CHART_TYPES, ChartSpec, ChartType, ChartView, hiddenOnLog, initialView, isHeatmap, joinsStack,
+  readTheme, seriesColour, thinSpec, toCsv, valuesAt, ZoomWindow,
+} from '../lib/chartModel';
+import { downloadText, downloadUrl, fmtNumber, safeFilename } from '../lib/format';
+
+export type { ChartSpec } from '../lib/chartModel';
 
 use([
   LineChart, BarChart, ScatterChart, HeatmapChart,
-  GridComponent, TooltipComponent, LegendComponent, DataZoomComponent, VisualMapComponent,
+  GridComponent, TooltipComponent, DataZoomComponent, VisualMapComponent, MarkLineComponent,
   CanvasRenderer,
 ]);
 
-export interface ChartSeries {
-  name: string;
-  values: number[];
-  /** 'right' puts this series on the secondary axis — price against MW. */
-  axis?: string;
-  /** Override the series type, e.g. a price LINE over stacked dispatch areas. */
-  kind?: string;
+export interface DrillTarget {
+  /** Index into the x the chart DREW (thinned, when it was too big). */
+  index: number;
+  /** Index into the spec's own x: what the caller supplied, whatever was drawn. */
+  sourceIndex: number;
+  label: string;
 }
 
-export interface ChartSpec {
-  chartId?: string;
-  title?: string;
-  kind?: string;
-  unit?: string;
-  /** Label for the secondary axis, when any series opts into it. */
-  unitRight?: string;
-  note?: string;
-  /** Stack the series — dispatch by carrier, capacity by technology. */
-  stacked?: boolean;
-  x: string[];
-  series: ChartSeries[];
+export interface ChartProps {
+  spec: ChartSpec;
+  /** Plot height in px; the full-screen view fills the window instead. */
+  height?: number;
+  /** Fires when the user clicks a time point (or a bar, or a heatmap cell). */
+  onDrill?: (target: DrillTarget) => void;
+  /** Extra content in the drill-in panel, e.g. the dashboard's per-asset breakdown. */
+  drillExtra?: (target: DrillTarget) => React.ReactNode;
+  pinned?: boolean;
+  onTogglePin?: () => void;
+  /** Panel layout: fill the width instead of the transcript's reading measure. */
+  wide?: boolean;
 }
 
-/** Fixed order, so a series keeps its colour across redraws. */
-const COLOURS = ['#0f766e', '#b45309', '#1d4ed8', '#9333ea', '#be123c', '#0e7490',
-                 '#4d7c0f', '#a21caf', '#0369a1', '#c2410c'];
+const FULL_ZOOM: ZoomWindow = { start: 0, end: 100 };
+const CLICK_SLOP_PX = 4;
 
-/** Beyond this, drawing every point costs more than it shows. */
-const MAX_POINTS = 4000;
-
-function isDark(): boolean {
-  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false;
-}
-
-/**
- * Thin a long series without lying about it.
- *
- * min/max pair per bucket rather than every nth point: decimation by sampling
- * drops spikes, and in this domain the spike IS the answer — the peak hour, the
- * scarcity price. Extremes survive; only the count changes.
- */
-function decimate(values: number[], labels: string[]): { values: number[]; labels: string[] } {
-  if (values.length <= MAX_POINTS) return { values, labels };
-  const bucket = Math.ceil(values.length / (MAX_POINTS / 2));
-  const outV: number[] = [];
-  const outL: string[] = [];
-  for (let i = 0; i < values.length; i += bucket) {
-    const slice = values.slice(i, i + bucket);
-    let lo = 0;
-    let hi = 0;
-    slice.forEach((v, j) => {
-      if (v < slice[lo]) lo = j;
-      if (v > slice[hi]) hi = j;
-    });
-    const [first, second] = lo <= hi ? [lo, hi] : [hi, lo];
-    outV.push(slice[first], slice[second]);
-    outL.push(labels[i + first] ?? '', labels[i + second] ?? '');
-  }
-  return { values: outV, labels: outL };
-}
-
-function sortedDescending(values: number[]): number[] {
-  return [...values].sort((a, b) => b - a);
-}
-
-/** Labels must be thinned exactly as the values were, or they drift apart. */
-function axisLabels(spec: ChartSpec, duration: boolean, xLabels: string[]): string[] {
-  const first = spec.series[0];
-  if (!first) return xLabels;
-  const values = duration ? sortedDescending(first.values) : first.values;
-  return decimate(values, xLabels).labels;
-}
-
-export function Chart({ spec }: { spec: ChartSpec }) {
-  const hostRef = useRef<HTMLDivElement>(null);
-  const chartRef = useRef<ECharts | null>(null);
-  const [duration, setDuration] = useState(false);
-  const [dark, setDark] = useState(isDark);
-
-  // Follow the OS theme: these live in a transcript the user scrolls back through,
-  // so a chart drawn this morning must not stay light against a dark page.
+/** Re-read the page's theme when the OS scheme flips; one subscription per chart. */
+function useThemeTick(): number {
+  const [tick, setTick] = useState(0);
   useEffect(() => {
     const mq = window.matchMedia?.('(prefers-color-scheme: dark)');
-    if (!mq) return;
-    const onChange = () => setDark(mq.matches);
-    mq.addEventListener('change', onChange);
-    return () => mq.removeEventListener('change', onChange);
+    if (!mq) return undefined;
+    const on = () => setTick((n) => n + 1);
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, []);
+  return tick;
+}
+
+/** Everything the user can change on one chart, shared by its inline and full-screen views. */
+function useChartState(spec: ChartSpec) {
+  const [view, setView] = useState<ChartView>(() => initialView(spec));
+  const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set());
+  const [yRange, setYRange] = useState<[number, number] | null>(null);
+  const [zoomed, setZoomed] = useState(false);
+  const [drill, setDrill] = useState<number | null>(null);
+  const zoomRef = useRef<ZoomWindow>({ ...FULL_ZOOM });
+
+  // The agent redrew the same slot with different data: drop state tied to the old one.
+  const key = spec.chartId ?? spec.title ?? '';
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) { first.current = false; return; }
+    setHidden(new Set());
+    setYRange(null);
+    setDrill(null);
+    setZoomed(false);
+    zoomRef.current = { ...FULL_ZOOM };
+    setView(initialView(spec));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+
+  const patchView = useCallback((patch: Partial<ChartView>) => {
+    // time <-> rank changes what x means: the zoom window and the marked point no longer apply.
+    if ('duration' in patch) {
+      zoomRef.current = { ...FULL_ZOOM };
+      setZoomed(false); setDrill(null); setYRange(null);
+    }
+    setView((v) => ({ ...v, ...patch }));
+  }, []);
+  const toggle = useCallback((name: string) => setHidden((h) => {
+    const next = new Set(h);
+    if (next.has(name)) next.delete(name); else next.add(name);
+    return next;
+  }), []);
+  // Isolate; a second double-click on the already-isolated series brings everything back.
+  const isolate = useCallback((name: string) => setHidden((h) => {
+    const others = spec.series.map((s) => s.name).filter((n) => n !== name);
+    const already = !h.has(name) && others.every((n) => h.has(n));
+    return already ? new Set() : new Set(others);
+  }), [spec.series]);
+
+  return { view, patchView, hidden, setHidden, toggle, isolate, yRange, setYRange, zoomed, setZoomed, drill, setDrill, zoomRef };
+}
+type ChartState = ReturnType<typeof useChartState>;
+
+interface FrameProps {
+  spec: ChartSpec;
+  st: ChartState;
+  boxMode: boolean;
+  heightCss: string;
+  chartRef: React.MutableRefObject<ECharts | null>;
+  onBox: (xRange: [number, number] | null, yRange: [number, number] | null) => void;
+  onPoint: (index: number) => void;
+}
+
+/** The canvas: owns the ECharts instance, its resize and its pointer handling. */
+function ChartFrame(props: FrameProps) {
+  const { spec, st, boxMode, heightCss, chartRef } = props;
+  const { view, hidden, yRange, drill, zoomRef } = st;
+  const hostRef = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(0);
+  const themeTick = useThemeTick();
+  const [box, setBox] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  // Callbacks go through a ref so the zrender listeners are bound once, not on every render.
+  const cb = useRef({ props, boxMode, spec, view });
+  cb.current = { props, boxMode, spec, view };
+  const narrow = width > 0 && width < 460;
+
+  const option = useMemo(
+    () => buildOption({
+      spec, view, hidden, theme: readTheme(), zoom: zoomRef.current, yRange, markIndex: drill, narrow,
+    }),
+    // zoomRef is read, not watched: zoom changes must not rebuild the option.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [spec, view, hidden, yRange, drill, narrow, themeTick],
+  );
+
+  // Create once; dispose on unmount. ResizeObserver, not the window event: the split
+  // panel, the full-screen view and the rail all change the element's size without
+  // the window changing at all.
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return undefined;
+    const chart = init(host, undefined, { renderer: 'canvas' });
+    chartRef.current = chart;
+    let frame = 0;
+    const observer = new ResizeObserver((entries) => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        const w = Math.round(entries[0]?.contentRect.width ?? host.clientWidth);
+        setWidth(w);
+        if (w > 0) chart.resize();
+      });
+    });
+    observer.observe(host);
+
+    chart.on('datazoom', () => {
+      const dz = (chart.getOption().dataZoom ?? []) as { start?: number; end?: number }[];
+      const first = dz[0];
+      if (first && typeof first.start === 'number' && typeof first.end === 'number') {
+        zoomRef.current = { start: first.start, end: first.end };
+        st.setZoomed(first.start > 0.01 || first.end < 99.99);
+      }
+    });
+    // Heatmap cell: the series click carries [col, row, value].
+    chart.on('click', (params) => {
+      if (params.componentSubType === 'heatmap' && Array.isArray(params.data)) {
+        cb.current.props.onPoint(Number(params.data[0]));
+      }
+    });
+    // Anywhere in the plot area: nearest x. A time series is read by x, and asking
+    // the user to hit a 1-pixel line to drill in is how a chart ends up not clickable.
+    const zr = chart.getZr();
+    let down: [number, number] | null = null;
+    zr.on('mousedown', (e) => { down = [e.offsetX, e.offsetY]; });
+    zr.on('click', (e) => {
+      const c = cb.current;
+      if (c.boxMode || isHeatmap(c.spec) || c.view.duration) return;
+      if (down && Math.hypot(e.offsetX - down[0], e.offsetY - down[1]) > CLICK_SLOP_PX) return;
+      const pt: [number, number] = [e.offsetX, e.offsetY];
+      if (!chart.containPixel('grid', pt)) return;
+      // A single-axis finder takes (and returns) a scalar; only a grid finder takes a point.
+      const idx = Math.round(Number(chart.convertFromPixel({ xAxisIndex: 0 }, pt[0])));
+      if (Number.isFinite(idx) && idx >= 0 && idx < c.spec.x.length) c.props.onPoint(idx);
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer.disconnect();
+      chart.dispose();
+      chartRef.current = null;
+    };
+    // st's setters are stable; the instance must be created exactly once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const kind = spec.kind ?? 'line';
-  const isHeatmap = kind === 'heatmap';
-  const longSeries = spec.x.length > 400;
-
-  const option = useMemo<EChartsOption>(() => {
-    const text = dark ? '#e8e6e3' : '#1f2328';
-    const muted = dark ? '#9aa0a6' : '#6b7280';
-    const grid = dark ? '#2f3237' : '#e5e4df';
-    const usesRight = spec.series.some((s) => s.axis === 'right');
-
-    if (isHeatmap) {
-      // series[i].values[j] = value for row i at column j — day × hour, usually.
-      // Same wire contract as every other kind; only the reading differs.
-      const data: [number, number, number][] = [];
-      let min = Infinity;
-      let max = -Infinity;
-      spec.series.forEach((s, row) =>
-        s.values.forEach((v, col) => {
-          data.push([col, row, v]);
-          if (v < min) min = v;
-          if (v > max) max = v;
-        }),
-      );
-      return {
-        tooltip: { position: 'top' },
-        // Deep enough for the axis labels AND the colour scale below them: at 62
-        // the visualMap's min/max printed on top of the hour labels.
-        grid: { left: 70, right: 20, top: 16, bottom: 84 },
-        xAxis: { type: 'category', data: spec.x, axisLabel: { color: muted, fontSize: 10, hideOverlap: true },
-                 axisLine: { lineStyle: { color: grid } } },
-        yAxis: { type: 'category', data: spec.series.map((s) => s.name),
-                 axisLabel: { color: muted, fontSize: 10 }, axisLine: { lineStyle: { color: grid } } },
-        visualMap: {
-          min: Number.isFinite(min) ? min : 0,
-          max: Number.isFinite(max) ? max : 1,
-          calculable: true, orient: 'horizontal', left: 'center', bottom: 2,
-          itemHeight: 90, itemWidth: 11,
-          textStyle: { color: muted, fontSize: 10 },
-          inRange: { color: dark ? ['#1f2124', '#0f766e', '#fbbf24'] : ['#f1f5f9', '#0f766e', '#b45309'] },
-        },
-        series: [{
-          type: 'heatmap', data, progressive: 2000,
-          emphasis: { itemStyle: { borderColor: text, borderWidth: 1 } },
-        }],
-      };
-    }
-
-    // A duration curve is read by RANK, so the x axis stops being time.
-    const xLabels = duration ? spec.x.map((_, i) => String(i + 1)) : spec.x;
-
-    const series: SeriesOption[] = spec.series.map((s, i) => {
-      const raw = duration ? sortedDescending(s.values) : s.values;
-      const thinned = decimate(raw, xLabels);
-      const type = s.kind ?? kind;
-      const colour = COLOURS[i % COLOURS.length];
-      // A right-axis series (price) must never join the stack of MW below it.
-      //
-      // Nor may ANY series stack in duration mode: each is sorted independently, so
-      // rank 1 of solar and rank 1 of gas are different hours, and their sum is a
-      // quantity that never occurred. Stacking it would draw a confident line
-      // through a number that does not exist.
-      const stacked = Boolean(spec.stacked) && !duration && s.axis !== 'right' && type !== 'line';
-      const filled = type === 'area' || stacked;
-      return {
-        name: s.name,
-        type: (type === 'bar' ? 'bar' : type === 'scatter' ? 'scatter' : 'line') as 'line' | 'bar' | 'scatter',
-        data: thinned.values,
-        yAxisIndex: s.axis === 'right' ? 1 : 0,
-        stack: stacked ? 'total' : undefined,
-        showSymbol: false,
-        symbolSize: type === 'scatter' ? 6 : 4,
-        lineStyle: { width: 1.8, color: colour },
-        itemStyle: { color: colour },
-        areaStyle: filled ? { color: colour, opacity: stacked ? 0.75 : 0.16 } : undefined,
-        sampling: 'lttb',
-      };
-    });
-
-    return {
-      color: COLOURS,
-      textStyle: { color: text },
-      // axis trigger: every series at the hovered snapshot. That is the question
-      // being asked ("what was happening at hour 47?"), not "what is this line".
-      tooltip: {
-        trigger: 'axis',
-        axisPointer: { type: 'cross', label: { backgroundColor: muted } },
-        backgroundColor: dark ? '#1f2124' : '#fff',
-        borderColor: grid,
-        textStyle: { color: text, fontSize: 12 },
-      },
-      legend: {
-        type: 'scroll', bottom: longSeries ? 34 : 4,
-        textStyle: { color: muted, fontSize: 11 },
-        icon: 'roundRect', itemHeight: 8, itemWidth: 12,
-      },
-      grid: { left: 62, right: usesRight ? 62 : 20, top: 16, bottom: longSeries ? 76 : 46 },
-      xAxis: {
-        type: 'category',
-        data: axisLabels(spec, duration, xLabels),
-        boundaryGap: kind === 'bar',
-        axisLabel: { color: muted, fontSize: 10, hideOverlap: true },
-        axisLine: { lineStyle: { color: grid } },
-      },
-      yAxis: [
-        { type: 'value', name: spec.unit, nameTextStyle: { color: muted, fontSize: 10 },
-          axisLabel: { color: muted, fontSize: 10 },
-          splitLine: { lineStyle: { color: grid, type: 'dashed' } } },
-        { type: 'value', name: spec.unitRight, nameTextStyle: { color: muted, fontSize: 10 },
-          axisLabel: { color: muted, fontSize: 10 }, splitLine: { show: false }, show: usesRight },
-      ],
-      // Zoom is the whole point for a long series: drag the slider, or scroll
-      // inside the plot. Both, because neither alone is discoverable.
-      dataZoom: longSeries
-        ? [{ type: 'inside', throttle: 50 },
-           // showDetail off: the endpoint labels are drawn OUTSIDE the slider and
-           // overflowed the card at both edges. The x axis and the tooltip already
-           // say where you are, and the plot redraws live while dragging.
-           { type: 'slider', height: 18, bottom: 6, left: 62, right: 20,
-             showDetail: false, borderColor: grid,
-             textStyle: { color: muted, fontSize: 9 } }]
-        : [{ type: 'inside', throttle: 50 }],
-      animation: false,
-      series,
-    };
-  }, [spec, kind, isHeatmap, duration, dark, longSeries]);
-
   useEffect(() => {
-    if (!hostRef.current) return;
-    const chart = chartRef.current ?? init(hostRef.current, undefined, { renderer: 'canvas' });
-    chartRef.current = chart;
-    // `true` replaces the option outright: a stale series would otherwise linger
-    // when the agent redraws the same chart id with fewer series.
-    chart.setOption(option, true);
-    const onResize = () => chart.resize();
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, [option]);
+    chartRef.current?.setOption(option, { notMerge: true });
+  }, [option, chartRef]);
 
-  // Dispose on unmount only — doing it per option change would flicker.
-  useEffect(() => () => { chartRef.current?.dispose(); chartRef.current = null; }, []);
-
-  const download = () => {
-    const url = chartRef.current?.getDataURL({
-      pixelRatio: 2, backgroundColor: dark ? '#1f2124' : '#ffffff',
-    });
-    if (!url) return;
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${(spec.title || 'chart').replace(/[^A-Za-z0-9._-]+/g, '_')}.png`;
-    a.click();
+  // Box zoom: an overlay owns the drag, so it cannot fight the chart's own pan.
+  const clampPoint = (e: React.PointerEvent): [number, number] => {
+    const r = hostRef.current!.getBoundingClientRect();
+    return [Math.min(Math.max(e.clientX - r.left, 0), r.width), Math.min(Math.max(e.clientY - r.top, 0), r.height)];
+  };
+  const onDown = (e: React.PointerEvent) => {
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    const [x, y] = clampPoint(e);
+    setBox({ x0: x, y0: y, x1: x, y1: y });
+  };
+  const onMove = (e: React.PointerEvent) => {
+    if (!box) return;
+    const [x, y] = clampPoint(e);
+    setBox({ ...box, x1: x, y1: y });
+  };
+  const onUp = () => {
+    const chart = chartRef.current;
+    const b = box;
+    setBox(null);
+    if (!chart || !b || Math.abs(b.x1 - b.x0) < 6 || Math.abs(b.y1 - b.y0) < 6) return;
+    const n = spec.x.length;
+    const toIdx = (px: number) =>
+      Math.min(Math.max(Math.round(Number(chart.convertFromPixel({ xAxisIndex: 0 }, px))), 0), n - 1);
+    const a = toIdx(Math.min(b.x0, b.x1));
+    const z = toIdx(Math.max(b.x0, b.x1));
+    const ys = [b.y0, b.y1].map((py) => Number(chart.convertFromPixel({ yAxisIndex: 0 }, py)));
+    const yOk = Number.isFinite(ys[0]) && Number.isFinite(ys[1]) && ys[0] !== ys[1];
+    props.onBox(a < z ? [a, z] : null, yOk ? [Math.min(ys[0], ys[1]), Math.max(ys[0], ys[1])] : null);
   };
 
   return (
-    <figure className="chart">
+    <div className="chart-plot" style={{ height: heightCss }}>
+      <div ref={hostRef} className="chart-canvas" role="img" aria-label={spec.title || 'chart'} />
+      {boxMode && (
+        <div className="chart-box-layer" onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp}>
+          {box && (
+            <div className="chart-box" style={{
+              left: Math.min(box.x0, box.x1), top: Math.min(box.y0, box.y1),
+              width: Math.abs(box.x1 - box.x0), height: Math.abs(box.y1 - box.y0),
+            }} />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** What every series was at the clicked point — the generic drill-in. */
+function DrillPanel(
+  { spec, index, stack, onClose, extra }:
+  { spec: ChartSpec; index: number; stack: ReadonlySet<string>; onClose: () => void; extra?: React.ReactNode },
+) {
+  const rows = valuesAt(spec, index).sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+  const max = Math.max(...rows.map((r) => Math.abs(r.value)), 1e-9);
+  // Only what is actually stacked adds up: a load line or a price on the right axis does not.
+  const stacked = rows.filter((r) => stack.has(r.name));
+  const total = stacked.reduce((s, r) => s + r.value, 0);
+  return (
+    <div className="chart-drill">
+      <div className="chart-drill-head">
+        <strong>{isHeatmap(spec) ? `Column ${spec.x[index]}` : spec.x[index]}</strong>
+        <span className="muted">
+          {rows.length} series{stacked.length > 1 ? `, stack total ${fmtNumber(total)} ${spec.unit ?? ''}` : ''}
+        </span>
+        <button className="btn-ghost sm" onClick={onClose}>Close</button>
+      </div>
+      <div className="chart-drill-rows">
+        {rows.slice(0, 40).map((r) => (
+          <div key={r.name} className="chart-drill-row">
+            <span className="chart-drill-name" title={r.name}>
+              <i className="swatch" style={{ background: r.colour }} />{r.name}
+            </span>
+            <span className="chart-drill-bar"><i style={{ width: `${(Math.abs(r.value) / max) * 100}%`, background: r.colour }} /></span>
+            <span className="chart-drill-val">{fmtNumber(r.value)}{spec.unit ? ` ${spec.unit}` : ''}</span>
+          </div>
+        ))}
+        {rows.length > 40 && <div className="muted">and {rows.length - 40} more</div>}
+      </div>
+      {extra}
+    </div>
+  );
+}
+
+interface InnerProps extends ChartProps {
+  st: ChartState;
+  keep: number[] | null;
+  expanded?: boolean;
+  onExpand?: () => void;
+  onClose?: () => void;
+  /** The full-screen view is open elsewhere: do not draw a second canvas. */
+  suspended?: boolean;
+  onPointExternal: (index: number) => void;
+}
+
+function ChartInner(props: InnerProps) {
+  const { spec, st, wide, expanded, suspended, pinned, onTogglePin, onExpand, onClose } = props;
+  const { view, hidden, yRange, zoomed, drill } = st;
+  const heatmap = isHeatmap(spec);
+  const [boxMode, setBoxMode] = useState(false);
+  const chartRef = useRef<ECharts | null>(null);
+
+  const resetZoom = () => {
+    st.zoomRef.current = { start: 0, end: 100 };
+    st.setYRange(null);
+    st.setZoomed(false);
+    chartRef.current?.dispatchAction({ type: 'dataZoom', start: 0, end: 100 });
+  };
+  const onBox = useCallback((xr: [number, number] | null, yr: [number, number] | null) => {
+    if (xr) chartRef.current?.dispatchAction({ type: 'dataZoom', startValue: xr[0], endValue: xr[1] });
+    if (yr) st.setYRange(yr);
+    if (xr || yr) st.setZoomed(true);
+    setBoxMode(false);
+  }, [st]);
+
+  const names = spec.series.map((s) => s.name);
+  const logLost = view.log ? hiddenOnLog(spec) : 0;
+  const heightCss = expanded ? 'max(320px, calc(100vh - 260px))' : `${props.height ?? 300}px`;
+  const png = () => {
+    const url = chartRef.current?.getDataURL({ pixelRatio: 2, backgroundColor: readTheme().surface });
+    if (url) downloadUrl(`${safeFilename(spec.title ?? '', 'chart')}.png`, url);
+  };
+  const csv = () => downloadText(`${safeFilename(spec.title ?? '', 'chart')}.csv`, toCsv(spec, view));
+  const drillTarget = drill !== null && drill < spec.x.length
+    ? { index: drill, sourceIndex: props.keep ? props.keep[drill] : drill, label: spec.x[drill] } : null;
+
+  return (
+    <figure className={`chart${wide ? ' chart--wide' : ''}${expanded ? ' chart--expanded' : ''}`}>
       <div className="chart-head">
         {spec.title && <figcaption className="chart-title">{spec.title}</figcaption>}
-        <div className="chart-tools">
-          {!isHeatmap && (
-            <button
-              className={`btn-ghost${duration ? ' is-on' : ''}`}
-              onClick={() => setDuration((d) => !d)}
-              title="Sort every series high to low — a duration curve, read by rank instead of by time"
-            >
-              Duration curve
-            </button>
-          )}
-          <button className="btn-ghost" onClick={download} title="Save this chart as a PNG">PNG</button>
-        </div>
+        {spec.thinnedFrom && (
+          <span className="chip chip--warn"
+            title="The chart was too large for the event stream, so each stretch kept its peak and trough.">
+            {spec.x.length.toLocaleString()} of {spec.thinnedFrom.toLocaleString()} points
+          </span>
+        )}
+      </div>
+      <div className="chart-tools" role="toolbar" aria-label="Chart controls">
+        {!heatmap && (
+          <select className="chart-select" aria-label="Chart type" value={view.type}
+            onChange={(e) => st.patchView({ type: e.target.value as ChartType })}>
+            {spec.kind === 'scatter' && <option value="scatter">Scatter</option>}
+            {CHART_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+          </select>
+        )}
+        {!heatmap && (
+          <button className={`btn-ghost${view.duration ? ' is-on' : ''}`} aria-pressed={view.duration}
+            onClick={() => st.patchView({ duration: !view.duration })}
+            title="Sort every series high to low: read by rank instead of by time">
+            Duration curve
+          </button>
+        )}
+        {!heatmap && (
+          <button className={`btn-ghost${view.log ? ' is-on' : ''}`} aria-pressed={view.log}
+            onClick={() => st.patchView({ log: !view.log })}
+            title="Logarithmic y axis (values at or below zero become gaps)">
+            Log y
+          </button>
+        )}
+        {!heatmap && (
+          <button className={`btn-ghost${boxMode ? ' is-on' : ''}`} aria-pressed={boxMode}
+            onClick={() => setBoxMode((b) => !b)}
+            title="Drag a box on the plot to zoom to it. Scroll to zoom, drag to pan.">
+            Box zoom
+          </button>
+        )}
+        <button className="btn-ghost" onClick={resetZoom} disabled={!zoomed && !yRange}>Reset zoom</button>
+        <span className="chart-tools-gap" />
+        <button className="btn-ghost" onClick={png} title="Save the chart as a PNG">PNG</button>
+        <button className="btn-ghost" onClick={csv} title="Save the data as CSV">CSV</button>
+        {onTogglePin && (
+          <button className={`btn-ghost${pinned ? ' is-on' : ''}`} aria-pressed={pinned} onClick={onTogglePin}
+            title="Keep this chart in the State panel">
+            {pinned ? 'Unpin' : 'Pin'}
+          </button>
+        )}
+        {expanded
+          ? <button className="btn-ghost" onClick={onClose}>Close</button>
+          : <button className="btn-ghost" onClick={onExpand} title="Open full screen">Expand</button>}
       </div>
 
-      <div ref={hostRef} className="chart-canvas" role="img" aria-label={spec.title || 'chart'} />
+      {!heatmap && names.length > 1 && (
+        <div className="chart-legend" role="group" aria-label="Series">
+          {names.map((name, i) => (
+            <button key={name} className={`chart-legend-item${hidden.has(name) ? ' is-off' : ''}`}
+              aria-pressed={!hidden.has(name)}
+              onClick={() => st.toggle(name)} onDoubleClick={() => st.isolate(name)}
+              onMouseEnter={() => chartRef.current?.dispatchAction({ type: 'highlight', seriesName: name })}
+              onMouseLeave={() => chartRef.current?.dispatchAction({ type: 'downplay', seriesName: name })}
+              title="Click to hide or show. Double-click to show only this series.">
+              <i className="swatch" style={{ background: seriesColour(spec, i) }} />{name}
+            </button>
+          ))}
+          {hidden.size > 0 && <button className="btn-ghost sm" onClick={() => st.setHidden(new Set())}>Show all</button>}
+        </div>
+      )}
 
+      {suspended ? (
+        <div className="chart-plot chart-plot--empty" style={{ height: heightCss }}>
+          <span className="muted">Open full screen.</span>
+        </div>
+      ) : (
+        <ChartFrame spec={spec} st={st} boxMode={boxMode} heightCss={heightCss} chartRef={chartRef}
+          onBox={onBox} onPoint={props.onPointExternal} />
+      )}
+
+      {drillTarget && (
+        <DrillPanel spec={spec} index={drillTarget.index} onClose={() => st.setDrill(null)}
+          stack={new Set(spec.series.filter((s) => joinsStack(s, view)).map((s) => s.name))}
+          extra={props.drillExtra?.(drillTarget)} />
+      )}
       {spec.note && <p className="chart-note">{spec.note}</p>}
-      {duration && (
+      {view.duration && (
         <p className="chart-note">
-          Sorted high to low — the x axis is rank, not time. Each series is sorted on its
-          own, so a given rank is a different hour in each
-          {spec.stacked ? ', and stacking is switched off because that sum never occurred' : ''}.
+          Sorted high to low: the x axis is rank, not time. Each series is sorted on its own, so a given
+          rank is a different hour in each
+          {(spec.stacked || view.type.startsWith('stacked')) ? ', and stacking is off because that sum never occurred' : ''}.
         </p>
+      )}
+      {logLost > 0 && (
+        <p className="chart-note">{logLost.toLocaleString()} values at or below zero are not drawn on a log axis.</p>
+      )}
+      {!heatmap && !drillTarget && spec.x.length > 1 && !view.duration && (
+        <p className="chart-hint muted">Click the plot to break down a point. Scroll to zoom, drag to pan.</p>
       )}
     </figure>
   );
 }
+
+/**
+ * The chart. `spec` must be referentially stable for the same content (the
+ * transcript caches it per event); `memo` then keeps a streaming token elsewhere on
+ * the page from touching it at all.
+ */
+export const Chart = memo(function Chart(props: ChartProps) {
+  // Over the draw budget the chart is thinned; everything below sees the thinned spec.
+  const thin = useMemo(() => thinSpec(props.spec), [props.spec]);
+  const spec = thin.spec;
+  const st = useChartState(spec);
+  const [full, setFull] = useState(false);
+  const { onDrill } = props;
+  const keep = thin.keep;
+  const point = useCallback((index: number) => {
+    st.setDrill(index);
+    onDrill?.({ index, sourceIndex: keep ? keep[index] : index, label: spec.x[index] });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onDrill, spec.x, keep, st.setDrill]);
+
+  useEffect(() => {
+    if (!full) return undefined;
+    const on = (e: KeyboardEvent) => { if (e.key === 'Escape') setFull(false); };
+    window.addEventListener('keydown', on);
+    return () => window.removeEventListener('keydown', on);
+  }, [full]);
+
+  return (
+    <>
+      <ChartInner {...props} spec={spec} keep={keep} st={st} suspended={full} onExpand={() => setFull(true)} onPointExternal={point} />
+      {full && createPortal(
+        <div className="chart-modal" role="dialog" aria-modal="true" aria-label={spec.title || 'Chart'}
+          onMouseDown={(e) => { if (e.target === e.currentTarget) setFull(false); }}>
+          <div className="chart-modal-body">
+            <ChartInner {...props} spec={spec} keep={keep} st={st} expanded wide onClose={() => setFull(false)} onPointExternal={point} />
+          </div>
+        </div>,
+        document.body,
+      )}
+    </>
+  );
+});

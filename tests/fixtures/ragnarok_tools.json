@@ -1,5 +1,5 @@
 {
- "_about": "Snapshot of Ragnarok's MCP catalogue (backend/mcp, main @ 0a6c448): name, readOnly annotation, whether the tool takes confirm, and the tier its own _needs_confirm(cheap=...) call uses (true=cheap, false=expensive, null=none). Regenerate with GET /api/agent/tools?live=true against a newer checkout; tests/test_policy.py also compares against the live checkout when one is available.",
+ "_about": "Snapshot of Ragnarok's MCP catalogue (backend/mcp, main @ 0a6c448 + compare_run_statistics): name, readOnly annotation, whether the tool takes confirm, and the tier its own _needs_confirm(cheap=...) call uses (true=cheap, false=expensive, null=none). Regenerate with GET /api/agent/tools?live=true against a newer checkout; tests/test_policy.py also compares against the live checkout when one is available.",
  "tools": [
   {
    "name": "list_importers",
@@ -924,6 +924,12 @@
    "readOnly": false,
    "hasConfirm": true,
    "engineCheap": true
+  },
+  {
+   "name": "compare_run_statistics",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
   }
  ]
 }
