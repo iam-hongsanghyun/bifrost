@@ -60,6 +60,13 @@ READ_ONLY = {
     "compare_runs", "compare_run_statistics", "get_metric_options", "get_period_results", "get_run_analysis", "get_kpis", "compare_companies", "get_asset_details",
     "get_statistics", "network_analysis", "consistency_check",
     "list_demand_db", "get_demand_db_slice",
+    # Siting screening statistics, P2X and plant reads.
+    "list_siting_datasets", "get_siting_dataset", "validate_siting_dataset",
+    "siting_correlation", "siting_lagged_correlation", "siting_profiles",
+    "siting_portfolio_metrics", "siting_optimise_portfolio", "siting_cluster_sites",
+    "siting_region_series", "siting_region_structure",
+    "list_p2x_technologies", "preview_p2x_chain", "get_p2x_results",
+    "list_plant_types", "get_plant_results",
     "list_conversions", "pypsa_io_capabilities", "describe_piecewise",
     "get_piecewise_curve", "check_piecewise_options", "describe_optimise_options",
     # The engine annotates these two as writing (they store a result in the
@@ -105,7 +112,7 @@ ALWAYS_GATED = {
     "siting_scan",
     # Permanent deletion.
     "delete_run", "delete_scenario", "delete_plugin_file", "uninstall_plugin",
-    "remove_tab_module",
+    "remove_tab_module", "delete_siting_dataset",
     # Installs or runs code, or touches stored credentials. Tab modules and plugins
     # change the app for every session on this engine and survive restarts.
     "install_plugin", "upload_plugin_file", "run_plugin_action",
@@ -126,6 +133,10 @@ EXPENSIVE = {
     "run_plugin_contribute", "revert_session", "adjust_values",
     "revert_adjustments", "apply_seasonal_rating", "snap_to_buses",
     "add_conversion", "set_tab_module_enabled", "pypsa_earth_apply",
+    # Plants and chains add or replace several components at once.
+    "add_plant", "edit_plant", "remove_plant", "build_p2x_chain",
+    # Screening: an upload stores a dataset; a promotion adds generators.
+    "upload_siting_dataset", "promote_siting_sites",
     # Reducing / slicing / merging the model replaces it.
     "temporal_cluster", "slice_model", "merge_models", "merge_fragment",
     "cluster_network_hac",

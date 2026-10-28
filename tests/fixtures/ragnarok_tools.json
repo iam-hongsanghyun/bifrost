@@ -966,6 +966,144 @@
    "readOnly": false,
    "hasConfirm": true,
    "engineCheap": null
+  },
+  {
+   "name": "list_siting_datasets",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "get_siting_dataset",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "validate_siting_dataset",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "upload_siting_dataset",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": null
+  },
+  {
+   "name": "delete_siting_dataset",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": null
+  },
+  {
+   "name": "siting_correlation",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "siting_lagged_correlation",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "siting_profiles",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "siting_portfolio_metrics",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "siting_optimise_portfolio",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "siting_cluster_sites",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "promote_siting_sites",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": null
+  },
+  {
+   "name": "list_p2x_technologies",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "preview_p2x_chain",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "get_p2x_results",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "build_p2x_chain",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": null
+  },
+  {
+   "name": "list_plant_types",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "add_plant",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": null
+  },
+  {
+   "name": "edit_plant",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": null
+  },
+  {
+   "name": "remove_plant",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": null
+  },
+  {
+   "name": "get_plant_results",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "siting_region_series",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "siting_region_structure",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
   }
  ]
 }
