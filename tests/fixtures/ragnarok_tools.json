@@ -1,5 +1,5 @@
 {
- "_about": "Snapshot of Ragnarok's MCP catalogue (backend/mcp, main @ 0a6c448 + compare_run_statistics + get_metric_options): name, readOnly annotation, whether the tool takes confirm, and the tier its own _needs_confirm(cheap=...) call uses (true=cheap, false=expensive, null=none). Regenerate with GET /api/agent/tools?live=true against a newer checkout; tests/test_policy.py also compares against the live checkout when one is available.",
+ "_about": "Snapshot of Ragnarok's MCP catalogue (backend/mcp, main @ 0a6c448 + compare_run_statistics + get_metric_options + get_period_results + get_run_analysis): name, readOnly annotation, whether the tool takes confirm, and the tier its own _needs_confirm(cheap=...) call uses (true=cheap, false=expensive, null=none). Regenerate with GET /api/agent/tools?live=true against a newer checkout; tests/test_policy.py also compares against the live checkout when one is available.",
  "tools": [
   {
    "name": "list_importers",
@@ -935,6 +935,36 @@
    "name": "get_metric_options",
    "readOnly": true,
    "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "get_period_results",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "get_run_analysis",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "list_demand_db",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "get_demand_db_slice",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "import_demand_db",
+   "readOnly": false,
+   "hasConfirm": true,
    "engineCheap": null
   }
  ]

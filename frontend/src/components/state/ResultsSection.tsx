@@ -10,7 +10,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Comparison, Dashboard, ListResponse, RunMeta, SnapshotDrill, stateApi } from '../../api';
 import { Chart, DrillTarget } from '../Chart';
-import { categorySpec, dayHourHeatmap, timeSpec } from '../../lib/derive';
+import { categorySpec, dayHourHeatmap, timeSpec, withCurtailment } from '../../lib/derive';
 import { ChartSpec } from '../../lib/chartModel';
 import { fmtNumber } from '../../lib/format';
 import { Resource, useResource } from '../../lib/useResource';
@@ -83,12 +83,16 @@ function DashboardView({ run, bus, carrier, period, onData }: {
   const dash = useResource(() => stateApi.dashboard(run, { bus, carrier, period }), [run, bus, carrier, period]);
   const d = dash.data;
   useEffect(() => { if (d) onData(d); }, [d, onData]);
+  const [showCurtail, setShowCurtail] = useState(false);
 
   const specs = useMemo(() => {
     if (!d) return null;
-    const dispatch: ChartSpec = timeSpec(d, 'dispatch', 'Dispatch by carrier', 'MW', d.dispatch_mw.series, {
-      kind: 'area', stacked: true,
-    });
+    const dispatch: ChartSpec = timeSpec(
+      d, showCurtail ? 'dispatch+curtail' : 'dispatch',
+      showCurtail ? 'Dispatch by carrier, with curtailment' : 'Dispatch by carrier', 'MW',
+      showCurtail ? withCurtailment(d.dispatch_mw.series, d.curtailment_mw.series) : d.dispatch_mw.series,
+      { kind: 'area', stacked: true },
+    );
     if (d.dispatch_mw.load_mw) {
       dispatch.series = [...dispatch.series, { name: 'load', kind: 'line', color: '#6b7280', values: d.dispatch_mw.load_mw }];
     }
@@ -122,7 +126,7 @@ function DashboardView({ run, bus, carrier, period, onData }: {
       ? dayHourHeatmap(d.x, d.price.series[0].values, `${d.run}:heat:${d.selected.bus}:${d.selected.period}`, 'Price by day and hour', `${d.price.currency}/MWh`)
       : null;
     return { dispatch, price, curtail, soc, flow, emissions, capacity, energy, emByCarrier, cost, loading, heat };
-  }, [d]);
+  }, [d, showCurtail]);
 
   if (dash.error && !d) return <p className="panel-error" role="alert">{dash.error}</p>;
   if (!d || !specs) return <p className="panel-empty muted">Loading the results.</p>;
@@ -139,6 +143,12 @@ function DashboardView({ run, bus, carrier, period, onData }: {
       <Kpis items={d.kpis} />
       {d.bus_filter_note && <p className="muted">{d.bus_filter_note}</p>}
       {d.stride > 1 && <p className="muted">Ragnarok stored every {d.stride}th snapshot of this run; the time charts show those.</p>}
+      {d.curtailment_mw.series.length > 0 && (
+        <label className="run-compare" title="Stack each carrier's curtailment on top of its dispatch: the top of the stack is what was available">
+          <input type="checkbox" checked={showCurtail} onChange={(e) => setShowCurtail(e.target.checked)} />
+          <span className="muted">Show curtailment on the dispatch chart</span>
+        </label>
+      )}
       {time(specs.dispatch, 300)}
       {time(specs.price)}
       {plain(specs.heat, specs.heat ? Math.min(640, Math.max(280, specs.heat.series.length * 5 + 110)) : 280)}

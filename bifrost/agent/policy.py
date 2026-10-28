@@ -57,8 +57,9 @@ READ_ONLY = {
     "get_plugin", "refresh_plugins", "list_plugin_files", "get_plugin_options",
     "list_tab_modules", "pypsa_earth_status", "pypsa_earth_build_status",
     "list_scenarios", "describe_scenario", "list_report_perspectives", "get_report",
-    "compare_runs", "compare_run_statistics", "get_metric_options", "get_kpis", "compare_companies", "get_asset_details",
+    "compare_runs", "compare_run_statistics", "get_metric_options", "get_period_results", "get_run_analysis", "get_kpis", "compare_companies", "get_asset_details",
     "get_statistics", "network_analysis", "consistency_check",
+    "list_demand_db", "get_demand_db_slice",
     "list_conversions", "pypsa_io_capabilities", "describe_piecewise",
     "get_piecewise_curve", "check_piecewise_options", "describe_optimise_options",
     # The engine annotates these two as writing (they store a result in the
@@ -129,7 +130,7 @@ EXPENSIVE = {
     "temporal_cluster", "slice_model", "merge_models", "merge_fragment",
     "cluster_network_hac",
     # File and queue imports overwrite the working model / write History.
-    "import_network", "import_project", "import_pypsa_native", "import_master",
+    "import_network", "import_demand_db", "import_project", "import_pypsa_native", "import_master",
     "clear_master", "import_result", "load_example", "load_queue_item",
 }
 

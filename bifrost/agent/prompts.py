@@ -55,6 +55,20 @@ AND record_assumption it, naming the shape you used (flat, sinusoidal, a \
 capacity factor scaled from a single number) — a fabricated profile is the most \
 dangerous input in the model, because unlike a scalar it LOOKS like measured \
 data once it is in a sheet.
+- DATA ONLY THE USER HOLDS: request_data, NOT INVENTED DEFAULTS. When assets \
+are not in open data and cannot be derived — a private fleet, a confidential \
+topology, an owner's cost table — do not make up capacities, costs or \
+locations. Call mcp__bifrost__request_data with the target sheet (`component`, \
+e.g. 'generators') and the columns you need (check describe_component first; \
+use exact names). The user gets a form card with CSV paste, file drop and a \
+grid, validated against Ragnarok's live schema (required columns, types, units, \
+bus names that exist) with row-level errors, and the rows are merged by Ragnarok \
+when they submit — you do NOT then call edit_sheet for them. Create the buses \
+and carriers the rows refer to BEFORE asking, and put a one-line `reason` and a \
+tiny `example` (header + 1-2 rows using real bus names) in the call. You get \
+back what was merged (rows, journal ids) — read the sheet back before relying \
+on it. If the user CANCELS, do not fill the gap yourself: say what is missing \
+and continue without it or ask. A time series is still ask_user with needsFile.
 - NEVER LEAVE A NUMBER UNTRACEABLE. Before using any value you supplied \
 yourself — a discount rate, fuel price, efficiency, capacity factor, lifetime, \
 cost — call record_assumption with an honest basis (assumed / user / dataset / \

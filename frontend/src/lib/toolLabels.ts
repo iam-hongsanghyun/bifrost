@@ -8,7 +8,7 @@
  *
  * So this module answers three questions per event — what is happening, in words;
  * is this plumbing the user should not have to read; and is the result worth
- * showing. It is deliberately rule-based on the verb rather than a table of all 156
+ * showing. It is deliberately rule-based on the verb rather than a table of all 161
  * Ragnarok tools: a table would silently fall back to raw names the day a tool is
  * added, which is the failure mode being fixed. Whole-tool exceptions below are for
  * the names whose verb alone would mislead (`submit_*` queues a solve, `check_*`
@@ -88,6 +88,7 @@ const VERBS: ReadonlyArray<readonly [string, (rest: string) => string]> = [
   ['optimize_', (r) => `Optimising ${subject(r)}`],
   ['cluster_', (r) => `Reducing ${subject(r)}`],
   ['ask_user', () => 'Asking you'],
+  ['request_data', () => 'Asking you for data'],
 ];
 
 function subject(raw: string): string {
@@ -186,6 +187,7 @@ export function describeToolDone(tool: string | undefined, ok: boolean): string 
     .replace(/^Analysing /, 'Analysed ')
     .replace(/^Building /, 'Built ')
     .replace(/^Solving$/, 'Solved')
+    .replace(/^Asking you for data$/, 'Asked you for data')
     .replace(/^Asking you$/, 'Asked you');
 }
 

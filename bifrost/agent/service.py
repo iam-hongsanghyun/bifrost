@@ -33,8 +33,8 @@ from typing import Any, AsyncIterator, Callable, Protocol
 # Ragnarok journals every mutation at its own store facade, whoever made it,
 # so Bifrost keeps no second journal — it reads Ragnarok's over HTTP when it
 # needs the timeline. Only the local event bus (chat streaming) is ours.
-from .. import assumptions, events_bus, ragnarok
-from . import approvals, auth, policy, prompts, questions, transcript
+from .. import dataask, assumptions, events_bus, ragnarok
+from . import approvals, auth, datarequests, policy, prompts, questions, transcript
 
 logger = logging.getLogger("bifrost.agent")
 
@@ -208,6 +208,7 @@ class AgentSession:
             "chat.message", "tool.start", "tool.end", "agent.status",
             "approval.request", "approval.resolved",
             "question.request", "question.resolved",
+            "data.request", "data.resolved",
             "chart.show", "assumption.recorded", "show.request",
         ):
             transcript.append(self.session_id, self.conversation_id, event, data)
@@ -344,6 +345,37 @@ class AgentSession:
         })
         self._set_state("thinking")
         return answer
+
+    async def _handle_request_data(self, args: dict[str, Any]) -> str:
+        """Ask the user for rows: publish a form card, await their submission.
+
+        The schema comes from Ragnarok live; an unknown component or column is
+        returned to the agent with the valid names so it can correct itself. The
+        merge itself happens in the router when the user submits (it is their
+        mutation, so no approval card); this only waits and relays the outcome.
+        """
+        component = str(args.get("component") or "").strip()
+        if not component:
+            return "(request_data needs a 'component' — a sheet such as 'generators'; see list_components)"
+        columns = args.get("columns") if isinstance(args.get("columns"), list) else None
+        try:
+            spec = await datarequests.build_spec(component, columns)
+        except dataask.DataAskError as exc:
+            return f"(request_data refused: {exc})"
+        except Exception as exc:  # noqa: BLE001 — engine down: say so, do not hang
+            return f"(request_data could not read Ragnarok's schema: {exc})"
+        req = datarequests.create(
+            self.conversation_id, spec,
+            str(args.get("reason") or "").strip(), str(args.get("example") or "").strip(),
+        )
+        self._publish("data.request", req.card())
+        self._set_state("awaiting_input")
+        outcome = await datarequests.wait(req)
+        self._publish("data.resolved", {
+            "requestId": req.id, "conversationId": self.conversation_id, "outcome": outcome,
+        })
+        self._set_state("thinking")
+        return outcome
 
     # ── SDK message consumer ────────────────────────────────────────────────
 
@@ -521,6 +553,7 @@ class AgentSession:
                 logger.warning("agent interrupt failed (%s)", self.session_id, exc_info=True)
         approvals.cancel_for(self.conversation_id)
         questions.cancel_for(self.conversation_id)
+        datarequests.cancel_for(self.conversation_id)
         self._set_state("idle", stopReason="interrupted")
 
     async def _dispose_backend(self) -> None:
@@ -537,6 +570,7 @@ class AgentSession:
     async def close(self) -> None:
         approvals.cancel_for(self.conversation_id)
         questions.cancel_for(self.conversation_id)
+        datarequests.cancel_for(self.conversation_id)
         await self._dispose_backend()
         self.state = "idle"
 
@@ -583,6 +617,36 @@ def _sdk_backend(session: AgentSession) -> AgentBackend:
     async def ask_user(args: dict[str, Any]) -> dict[str, Any]:
         answer = await session._handle_ask_user(args)
         return {"content": [{"type": "text", "text": answer}]}
+
+    @tool(
+        "request_data",
+        "Ask the USER to supply rows you cannot get from open data — a private fleet, "
+        "a confidential topology, a cost table only they hold. Name the target sheet "
+        "(`component`, e.g. 'generators') and the columns you need; the user sees a "
+        "form card (CSV paste, file drop, or a small grid) validated against "
+        "Ragnarok's live schema — required columns, types, units, bus names that "
+        "exist in the model — with row-level errors shown to THEM, and the rows are "
+        "merged by Ragnarok when they submit. You get back a summary of what was "
+        "merged (rows, journal ids) or that they cancelled. Use this INSTEAD OF "
+        "inventing defaults for assets the user owns. For a time series use ask_user "
+        "with needsFile instead. Build the buses/carriers the rows refer to FIRST.",
+        {
+            "type": "object",
+            "properties": {
+                "component": {"type": "string", "description": "Target sheet or component, e.g. 'generators', 'Line' (see list_components)."},
+                "columns": {
+                    "type": "array", "items": {"type": "string"},
+                    "description": "Columns you NEED beyond the schema's required ones, e.g. ['carrier','p_nom','marginal_cost']. Names must exist in describe_component.",
+                },
+                "reason": {"type": "string", "description": "One sentence for the user: what these rows are for."},
+                "example": {"type": "string", "description": "Optional CSV example (header + 1-2 rows) shown in the card, using buses that exist."},
+            },
+            "required": ["component", "reason"],
+        },
+    )
+    async def request_data(args: dict[str, Any]) -> dict[str, Any]:
+        outcome = await session._handle_request_data(args)
+        return {"content": [{"type": "text", "text": outcome}]}
 
     @tool(
         "record_assumption",
@@ -773,7 +837,7 @@ def _sdk_backend(session: AgentSession) -> AgentBackend:
         return {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}]}
 
     bifrost_server = create_sdk_mcp_server(
-        name="bifrost", version="1.0.0", tools=[ask_user, record_assumption, show_chart, show_in_ragnarok, read_attachment]
+        name="bifrost", version="1.0.0", tools=[ask_user, request_data, record_assumption, show_chart, show_in_ragnarok, read_attachment]
     )
 
     agent_auth = auth.resolve()

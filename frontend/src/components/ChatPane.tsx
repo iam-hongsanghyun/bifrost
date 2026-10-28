@@ -20,6 +20,7 @@ import { describeTool, describeToolDone, humanSummary, isPlumbing } from '../lib
 import { Markdown } from '../lib/markdown';
 import { Chart, ChartSpec } from './Chart';
 import { specFor } from '../lib/chartEvents';
+import { DataRequestCard } from './DataRequestCard';
 
 interface Props {
   events: ChatEvent[];
@@ -92,6 +93,7 @@ type Row =
   | { kind: 'plumbing'; count: number; key: string }
   | { kind: 'question'; event: ChatEvent; answered: string | null; key: string }
   | { kind: 'approval'; event: ChatEvent; decided: string | null; key: string }
+  | { kind: 'data'; event: ChatEvent; outcome: string | null; key: string }
   | { kind: 'chart'; spec: ChartSpec; key: string; chartId: string }
   | { kind: 'chartStub'; event: ChatEvent; key: string; chartId: string }
   | { kind: 'assumption'; event: ChatEvent; key: string }
@@ -117,9 +119,11 @@ function toRows(events: ChatEvent[]): Row[] {
   // user could answer twice — the agent has already moved on.
   const answered = new Map<string, string>();
   const decided = new Map<string, string>();
+  const supplied = new Map<string, string>();
   events.forEach((e) => {
     if (e.kind === 'question.resolved' && e.questionId) answered.set(e.questionId, e.answer ?? '');
     if (e.kind === 'approval.resolved' && e.approvalId) decided.set(e.approvalId, e.decision ?? '');
+    if (e.kind === 'data.resolved' && e.requestId) supplied.set(e.requestId, e.outcome ?? '');
   });
 
   events.forEach((event, index) => {
@@ -128,6 +132,10 @@ function toRows(events: ChatEvent[]): Row[] {
         kind: 'question', event, key: `q-${event.questionId}`,
         answered: answered.get(event.questionId) ?? null,
       });
+      return;
+    }
+    if (event.kind === 'data.request' && event.requestId) {
+      rows.push({ kind: 'data', event, key: `d-${event.requestId}`, outcome: supplied.get(event.requestId) ?? null });
       return;
     }
     if (event.kind === 'approval.request' && event.approvalId) {
@@ -155,7 +163,7 @@ function toRows(events: ChatEvent[]): Row[] {
       return;
     }
     // The resolutions themselves are folded into the card above.
-    if (event.kind === 'question.resolved' || event.kind === 'approval.resolved') return;
+    if (event.kind === 'question.resolved' || event.kind === 'approval.resolved' || event.kind === 'data.resolved') return;
     const isTool = event.kind === 'tool.start' || event.kind === 'tool.end';
     const tool = event.tool ?? (event.callId ? startOf.get(event.callId)?.tool : undefined);
 
@@ -437,6 +445,12 @@ export function ChatPane(props: Props) {
               <QuestionCard key={row.key} event={row.event} answered={row.answered}
                 onAnswer={(id, answer) => void props.onAnswerQuestion(id, answer)}
                 onUpload={props.onUpload} />
+            );
+          }
+          if (row.kind === 'data') {
+            return (
+              <DataRequestCard key={row.key} event={row.event} outcome={row.outcome}
+                onOpenJournal={props.onOpenJournal} />
             );
           }
           if (row.kind === 'approval') {

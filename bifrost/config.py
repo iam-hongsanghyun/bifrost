@@ -65,6 +65,13 @@ class Config:
     #: page server-side.
     table_max_rows: int = 20_000
 
+    #: Most data rows one ``request_data`` submission may carry. A private fleet is
+    #: tens to hundreds of rows; a bigger table is a file import, not a paste box.
+    dataask_max_rows: int = 5_000
+
+    #: Seconds the agent waits for the user to supply (or cancel) a data request.
+    dataask_timeout_s: int = 900
+
     @property
     def conversations_dir(self) -> Path:
         return self.data_dir / "conversations"
@@ -101,6 +108,8 @@ class Config:
             chart_max_points=_env_int("BIFROST_CHART_MAX_POINTS", 10_000),
             chart_max_cells=_env_int("BIFROST_CHART_MAX_CELLS", 250_000),
             table_max_rows=_env_int("BIFROST_TABLE_MAX_ROWS", 20_000),
+            dataask_max_rows=_env_int("BIFROST_DATAASK_MAX_ROWS", 5_000),
+            dataask_timeout_s=_env_int("BIFROST_DATAASK_TIMEOUT_S", 900),
         )
 
 

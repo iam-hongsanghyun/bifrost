@@ -46,6 +46,15 @@ export interface ChatEvent {
   answer?: string;
   /** The question wants a FILE (a profile, a cost table), not a choice. */
   needsFile?: boolean;
+  /** data.request / data.resolved — the agent asking for rows only the user holds */
+  requestId?: string;
+  sheet?: string;
+  component?: string;
+  reason?: string;
+  example?: string;
+  columns?: DataColumn[];
+  needed?: string[];
+  outcome?: string;
   /** chat.attachments — what the user handed over, rendered as chips. */
   files?: UploadedFile[];
   /** chart.show */
@@ -80,6 +89,34 @@ export interface ChatEvent {
   approvalId?: string;
   args?: Record<string, unknown>;
   decision?: string;
+}
+
+/** One column of a data request, straight from Ragnarok's live schema. */
+export interface DataColumn {
+  name: string;
+  type: 'string' | 'float' | 'int' | 'boolean';
+  unit: string;
+  required: boolean;
+  description: string;
+  default: string;
+}
+
+/** A row-level problem. `line` is the line of the pasted text (the header is line 1). */
+export interface DataIssue { line: number | null; column: string | null; message: string }
+
+/** What validating (or submitting) pasted rows found. */
+export interface DataReport {
+  ok: boolean;
+  sheet: string;
+  rowCount: number;
+  columns: string[];
+  errors: DataIssue[];
+  warnings: DataIssue[];
+  newCarriers: string[];
+  renames: Record<string, string>;
+  preview: Record<string, unknown>[];
+  merged?: boolean;
+  summary?: { rowsMerged: number; journalEntryIds: number[]; sheet: string } | null;
 }
 
 /** A hydrated stored chart goes back to the server as the stub it came as: the
@@ -269,6 +306,16 @@ export const api = {
       body: JSON.stringify({ answer }),
     }).then(json<Record<string, unknown>>),
 
+  /** Check pasted rows against the live schema and the model. Changes nothing. */
+  validateData: (requestId: string, text: string) =>
+    fetch(`/api/agent/data-requests/${requestId}/validate`, jsonBody({ text })).then(json<DataReport>),
+  /** Validate and, when clean, merge through Ragnarok. The agent is waiting on this. */
+  submitData: (requestId: string, text: string) =>
+    fetch(`/api/agent/data-requests/${requestId}/submit`, jsonBody({ text })).then(json<DataReport>),
+  /** Decline; the agent is told not to invent the rows. */
+  cancelData: (requestId: string) =>
+    fetch(`/api/agent/data-requests/${requestId}/cancel`, { method: 'POST' }).then(json<Record<string, unknown>>),
+
   /** Allow or deny a tool call that needs approval. Same deal: it is waiting. */
   decideApproval: (approvalId: string, decision: 'allow' | 'deny') =>
     fetch(`/api/agent/approvals/${approvalId}`, {
@@ -291,6 +338,7 @@ export function subscribeChat(
     'show.request',
     'assumption.recorded',
     'question.request', 'question.resolved',
+    'data.request', 'data.resolved',
   ];
   const handlers = kinds.map((kind) => {
     const handler = (event: MessageEvent) => {

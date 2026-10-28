@@ -1,6 +1,6 @@
 /** Chart specs derived on the client from data the dashboard already holds. */
 import { CategoryChart, Dashboard, NamedSeries } from '../api';
-import { ChartSpec } from './chartModel';
+import { ChartSpec, paletteColour } from './chartModel';
 
 /** Pad or cut `values` to `n` so a series that is short stays aligned (gaps, never shifts). */
 export function fit(values: (number | null)[], n: number): (number | null)[] {
@@ -20,6 +20,24 @@ export function timeSpec(
     series: series.map((s) => ({ name: s.name, values: fit(s.values, dash.x.length), color: s.color })),
     ...extra,
   };
+}
+
+/**
+ * Dispatch series with each carrier's curtailment appended, so a stacked chart
+ * draws it on top: dispatch + curtailment = available. A curtailment band takes
+ * its carrier's colour at ~40% opacity.
+ */
+export function withCurtailment(dispatch: NamedSeries[], curtailment: NamedSeries[]): NamedSeries[] {
+  const colour = new Map(dispatch.map((s, i) => [s.name, s.color ?? paletteColour(i)]));
+  const bands = curtailment.map((s, i) => {
+    const base = colour.get(s.name) ?? s.color ?? paletteColour(dispatch.length + i);
+    return {
+      name: `${s.name} (curtailed)`,
+      values: s.values,
+      color: /^#[0-9a-f]{6}$/i.test(base) ? `${base}66` : base,
+    };
+  });
+  return [...dispatch.map((s, i) => ({ ...s, color: colour.get(s.name) ?? paletteColour(i) })), ...bands];
 }
 
 export function categorySpec(

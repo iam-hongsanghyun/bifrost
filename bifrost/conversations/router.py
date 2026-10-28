@@ -230,20 +230,28 @@ async def activate_conversation(conversation_id: str) -> dict[str, Any]:
             ) from None
 
     data = STORE.read_project(conversation_id)
+    adopted_live = False
     try:
-        if data is None and previous == conversation_id and meta_before:
+        if previous == conversation_id and meta_before:
             # Re-opening the conversation that already owns the session — for
-            # example after a reload. Adopt what is loaded instead of clearing it:
-            # this is the case where clearing destroyed the model the agent had just
-            # built in this very conversation.
+            # example after a reload. The LIVE session is the truth here, not the
+            # stored package: adopt it instead of loading the package over it. With
+            # no package, clearing destroyed the model the agent had just built; with
+            # an OLDER package, loading it silently discarded everything since the
+            # last snapshot — and, even when identical, replaced the model twice,
+            # filling the Changes timeline with "user: replace model" and flipping
+            # the rail to "model behind" on every reload.
             try:
                 adopted = await CLIENT.export_project(conversation=_sidecar(conversation_id))
                 STORE.save_project(conversation_id, adopted, version=meta_before.get("version"))
                 data = adopted
+                adopted_live = True
                 logger.info("Adopted the live session into conversation %s", conversation_id)
             except (RagnarokUnavailable, RagnarokError):
                 logger.exception("Could not adopt the live session into %s", conversation_id)
-        if data is None:
+        if adopted_live:
+            loaded = {"adopted": True}  # the session already held this world; nothing was loaded
+        elif data is None:
             await CLIENT.clear_session()
             loaded = None
         else:

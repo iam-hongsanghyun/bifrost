@@ -15,7 +15,8 @@ from fastapi import APIRouter, HTTPException, Query, UploadFile
 from fastapi import File as FastAPIFile
 from pydantic import BaseModel
 
-from . import AGENT_AVAILABLE, approvals, attachments, auth, catalog, policy, questions, service, transcript
+from ..ragnarok import RagnarokError, RagnarokUnavailable
+from . import AGENT_AVAILABLE, approvals, attachments, auth, catalog, datarequests, policy, questions, service, transcript
 
 router = APIRouter(prefix="/api/agent", tags=["agent"])
 
@@ -47,6 +48,7 @@ def agent_status(session_id: str = Query("default", alias="session_id")) -> dict
         "costUsd": round(session.cost_usd, 4) if session else 0.0,
         "pendingApprovals": approvals.pending_for(session.conversation_id) if session else [],
         "pendingQuestions": questions.pending_for(session.conversation_id) if session else [],
+        "pendingDataRequests": datarequests.pending_for(session.conversation_id) if session else [],
     }
 
 
@@ -127,6 +129,55 @@ def agent_answer_question(question_id: str, payload: QuestionAnswerRequest) -> d
     if resolved is None:
         raise HTTPException(status_code=404, detail="Question not found (already answered or timed out).")
     return {"resolved": True, "questionId": question_id}
+
+
+class DataTextRequest(BaseModel):
+    #: Pasted CSV / TSV, a dropped file's text, or the grid form serialised to CSV.
+    text: str
+
+
+def _data_request(request_id: str) -> datarequests.DataRequest:
+    req = datarequests.get(request_id)
+    if req is None:
+        raise HTTPException(status_code=404, detail="Data request not found (already answered, cancelled or timed out).")
+    return req
+
+
+async def _engine_call(coro: Any) -> Any:
+    try:
+        return await coro
+    except RagnarokUnavailable as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except RagnarokError as exc:
+        raise HTTPException(status_code=502, detail=f"Ragnarok refused: {exc.detail}") from exc
+
+
+@router.post("/data-requests/{request_id}/validate")
+async def agent_validate_data(request_id: str, payload: DataTextRequest) -> dict[str, Any]:
+    """Check pasted rows against the live schema and the model. Mutates nothing."""
+    req = _data_request(request_id)
+    report = await _engine_call(datarequests.validate_text(req, payload.text))
+    return report.as_dict()
+
+
+@router.post("/data-requests/{request_id}/submit")
+async def agent_submit_data(request_id: str, payload: DataTextRequest) -> dict[str, Any]:
+    """Validate and, when clean, merge via Ragnarok and release the agent.
+
+    The merge is the USER's mutation, so there is no approval step. Rows with
+    errors merge nothing and leave the request pending, so the card can fix them.
+    """
+    req = _data_request(request_id)
+    report, summary = await _engine_call(datarequests.submit(req, payload.text))
+    return {**report.as_dict(), "merged": summary is not None, "summary": summary}
+
+
+@router.post("/data-requests/{request_id}/cancel")
+def agent_cancel_data(request_id: str) -> dict[str, Any]:
+    """The user declines; the agent is told not to invent the rows."""
+    if datarequests.resolve(request_id, datarequests.CANCELLED) is None:
+        raise HTTPException(status_code=404, detail="Data request not found (already answered or timed out).")
+    return {"resolved": True, "requestId": request_id}
 
 
 @router.post("/files")

@@ -79,13 +79,14 @@ class RagnarokClient:
         json: Any | None = None,
         params: dict[str, Any] | None = None,
         files: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
         expect_bytes: bool = False,
     ) -> Any:
         url = f"{self.base}{path}"
         try:
             async with self._client() as client:
                 resp = await client.request(
-                    method, url, json=json, params=params, files=files
+                    method, url, json=json, params=params, files=files, headers=headers
                 )
         except httpx.RequestError as exc:
             raise RagnarokUnavailable(
@@ -321,6 +322,28 @@ class RagnarokClient:
         """
         return await self._request(
             "POST", "/api/session/clear", params={"session_id": self.session_id}
+        )
+
+    # ── the data-ask loop (request_data) ──────────────────────────────────────
+    async def config(self) -> dict[str, Any]:
+        """Ragnarok's boot bundle; its ``schema.components`` is the live schema
+        a data request is validated against (never a copy kept here)."""
+        return await self._request("GET", "/api/config")
+
+    async def merge_fragment(
+        self, fragment: dict[str, Any], *, conversation_id: str | None = None
+    ) -> dict[str, Any]:
+        """Merge a fragment into the session model (``apply``), as the USER.
+
+        No ``X-Ragnarok-Actor`` header is sent, so the journal tags the entry
+        ``user``: the person pasted these rows, the agent did not write them. The
+        conversation id still travels so the change links to its chat step.
+        """
+        headers = {"X-Ragnarok-Conversation": conversation_id} if conversation_id else None
+        return await self._request(
+            "POST", "/api/session/merge-fragment",
+            json={"sessionId": self.session_id, "fragment": fragment, "apply": True},
+            headers=headers,
         )
 
     async def identity(self) -> dict[str, Any]:

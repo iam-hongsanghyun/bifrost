@@ -19,6 +19,7 @@ What Bifrost owns:
 | | |
 |---|---|
 | `bifrost/agent/` | A Claude Agent SDK session whose tools are Ragnarok's MCP surface |
+| `bifrost/dataask.py` | `request_data`: validates rows the user supplies against Ragnarok's live schema (pure) |
 | `bifrost/conversations/` | The left rail, and the project package each conversation owns |
 | `bifrost/ragnarok.py` | The only route to a model |
 | `frontend/` | The shell: conversation tab, Ragnarok tab, grouped rail |
@@ -104,6 +105,39 @@ indices shared by every series so peaks survive and stacks still add up.
 Tunables (environment): `BIFROST_CHART_MAX_POINTS` (10000), `BIFROST_CHART_MAX_CELLS`
 (250000, the most the browser draws), `BIFROST_TABLE_MAX_ROWS` (20000).
 
+## Asking the user for data (`request_data`)
+
+When a gap cannot be filled from open data — a private fleet, a confidential topology —
+the agent does not invent defaults. It calls the in-process tool
+`mcp__bifrost__request_data(component, columns, reason, example)` and the chat shows a
+**form card**:
+
+- the target sheet and the columns needed (the schema's required ones plus what the agent
+  named), with type and unit, read from Ragnarok's live `/api/config` schema, never a copy;
+- three ways in, one path out: **paste CSV** (a spreadsheet selection, tab- or
+  semicolon-separated, works), **choose or drop a `.csv` file**, or a small **form grid**;
+- validation as you type, shown as row-level errors (line of the paste, column, message):
+  required and unknown columns (an unknown column is an error, so a typo does not silently
+  drop data), types, units (a header may say `p_nom [kW]`; known power / energy / voltage /
+  per-unit conversions apply, anything else is refused), `bus` / `bus0` / `bus1` must exist
+  in the model (with a "did you mean"), duplicate names. Warnings, which do not block: a new
+  carrier (added to `carriers`), a name that exists (Ragnarok's merge saves it as `name_2`).
+
+**Add rows to the model** merges only when every row is valid, through Ragnarok's
+`POST /api/session/merge-fragment` (`apply`), as the *user*: the journal entry is tagged
+`user` with this conversation's id, and there is **no second approval**, because the person
+typed those rows into a card the agent put in front of them. The agent gets back a summary
+(rows, columns, renamed names, carriers added, journal entry ids). **Cancel** tells the agent
+not to invent the rows; no answer within `BIFROST_DATAASK_TIMEOUT_S` says the same. A time
+series is still `ask_user` with `needsFile`; `request_data` is for rows of a component sheet.
+
+Routes (`/api/agent/data-requests/{id}`): `POST /validate` (changes nothing), `POST /submit`,
+`POST /cancel`; `GET /api/agent/status` lists `pendingDataRequests`. Limits:
+`BIFROST_DATAASK_MAX_ROWS` (5000), `BIFROST_DATAASK_TIMEOUT_S` (900). Tests:
+`tests/test_dataask.py` (validation), `tests/test_datarequests.py` (lifecycle against a mock
+engine), `tests/test_dataask_roundtrip.py` (against the real Ragnarok: its schema, its
+merge, its journal).
+
 ## Layout
 
 ```
@@ -114,7 +148,8 @@ bifrost/          application code
   state.py        shapes Ragnarok's model / journal / runs for the State panel (pure)
   state_router.py /api/state/*: thin fetches, then state.py
   charts.py       show_chart arguments -> chart.show payload (pure)
-  agent/          Claude Agent SDK host (status, chat, approvals, questions, files…)
+  dataask.py      validate user-supplied rows against Ragnarok's schema (pure)
+  agent/          Claude Agent SDK host (status, chat, approvals, questions, data requests, files…)
   conversations/  store + router
 tests/            mirrors bifrost/
 frontend/         the shell
@@ -166,7 +201,7 @@ catalogue and fails when the approval policy has fallen behind it.
 
 ## The agent's tools and who approves them
 
-The agent's whole toolset is Ragnarok's MCP server (`python -m backend.mcp`, 156 tools at
+The agent's whole toolset is Ragnarok's MCP server (`python -m backend.mcp`, 161 tools at
 the time of writing), launched by the SDK from the **chosen checkout, on that checkout's own
 interpreter**. Two gates exist for a mutating tool, and they must not stack:
 
@@ -194,6 +229,7 @@ about it, and `?live=true` compares it with the checkout's real catalogue.
 | `GET /api/session/journal` | which journal entries a tool call produced |
 | `POST /api/export/project`, `POST /api/import/project/load` | a conversation's package |
 | `GET /api/events` | Ragnarok's `session.version` stream, read by the browser directly |
+| `GET /api/config`, `POST /api/session/merge-fragment` | `request_data`: the live schema to validate against, and the merge |
 
 `/api/import/project/load` only *parses* a package; Bifrost then puts the model into the
 session with `POST /api/session/model`. The tools themselves reach Ragnarok through the MCP
