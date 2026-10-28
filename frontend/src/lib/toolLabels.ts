@@ -8,7 +8,7 @@
  *
  * So this module answers three questions per event — what is happening, in words;
  * is this plumbing the user should not have to read; and is the result worth
- * showing. It is deliberately rule-based on the verb rather than a table of all 189
+ * showing. It is deliberately rule-based on the verb rather than a table of all 196
  * Ragnarok tools: a table would silently fall back to raw names the day a tool is
  * added, which is the failure mode being fixed. Whole-tool exceptions below are for
  * the names whose verb alone would mislead (`submit_*` queues a solve, `check_*`

@@ -1134,6 +1134,48 @@
    "readOnly": false,
    "hasConfirm": true,
    "engineCheap": null
+  },
+  {
+   "name": "get_time_units",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "preview_time_units",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "set_time_units",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": true
+  },
+  {
+   "name": "set_weightings_from_spacing",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "sample_workbook",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "make_noncyclic_for_rolling",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "relax_maintenance",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
   }
  ]
 }
