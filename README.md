@@ -201,7 +201,7 @@ catalogue and fails when the approval policy has fallen behind it.
 
 ## The agent's tools and who approves them
 
-The agent's whole toolset is Ragnarok's MCP server (`python -m backend.mcp`, 184 tools at
+The agent's whole toolset is Ragnarok's MCP server (`python -m backend.mcp`, 189 tools at
 the time of writing), launched by the SDK from the **chosen checkout, on that checkout's own
 interpreter**. Two gates exist for a mutating tool, and they must not stack:
 

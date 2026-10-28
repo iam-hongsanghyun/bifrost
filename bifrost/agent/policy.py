@@ -65,6 +65,7 @@ READ_ONLY = {
     "siting_correlation", "siting_lagged_correlation", "siting_profiles",
     "siting_portfolio_metrics", "siting_optimise_portfolio", "siting_cluster_sites",
     "siting_region_series", "siting_region_structure",
+    "get_carbon_price", "get_annual_budgets",
     "list_p2x_technologies", "preview_p2x_chain", "get_p2x_results",
     "list_plant_types", "get_plant_results",
     "list_conversions", "pypsa_io_capabilities", "describe_piecewise",
@@ -98,6 +99,8 @@ CHEAP_EDITS = {
     "save_scenario", "set_active_scenario", "set_custom_dsl",
     "set_piecewise_curve", "clear_piecewise_curve", "set_carrier_growth_limit",
     "set_maintenance",
+    # Carbon price and annual budgets stored as settings (the engine gates them as cheap).
+    "set_carbon_price", "set_annual_budget",
     # Configuring / stopping a PyPSA-Earth build — the build itself is gated.
     "pypsa_earth_configure", "pypsa_earth_stop",
 }
@@ -135,6 +138,8 @@ EXPENSIVE = {
     "add_conversion", "set_tab_module_enabled", "pypsa_earth_apply",
     # Plants and chains add or replace several components at once.
     "add_plant", "edit_plant", "remove_plant", "build_p2x_chain",
+    # Writes horizon budgets into the model's component rows.
+    "apply_annual_budgets",
     # Screening: an upload stores a dataset; a promotion adds generators.
     "upload_siting_dataset", "promote_siting_sites",
     # Reducing / slicing / merging the model replaces it.

@@ -1104,6 +1104,36 @@
    "readOnly": true,
    "hasConfirm": false,
    "engineCheap": null
+  },
+  {
+   "name": "get_carbon_price",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "set_carbon_price",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": null
+  },
+  {
+   "name": "get_annual_budgets",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "set_annual_budget",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": null
+  },
+  {
+   "name": "apply_annual_budgets",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": null
   }
  ]
 }
