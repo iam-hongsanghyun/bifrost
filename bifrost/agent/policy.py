@@ -50,7 +50,7 @@ READ_ONLY = {
     "physical_risk_get_portfolio", "physical_risk_get_run", "physical_risk_report",
     "validate_model", "check_model", "get_sheet_stats", "get_series_window",
     "get_run_series", "get_journal", "get_journal_diff", "get_master_meta",
-    "run_plugin_analysis", "optimize_procurement",
+    "run_plugin_analysis", "optimize_procurement", "tool_catalogue",
     "get_server_info", "get_server_log", "list_examples", "list_import_databases",
     "list_starter_packs", "list_import_countries", "get_import_provenance",
     "list_import_secrets", "get_distinct_values", "get_run_model_sheet",
