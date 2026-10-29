@@ -66,7 +66,7 @@ READ_ONLY = {
     "siting_portfolio_metrics", "siting_optimise_portfolio", "siting_cluster_sites",
     "siting_region_series", "siting_region_structure",
     "get_carbon_price", "get_annual_budgets",
-    "get_time_units", "preview_time_units",
+    "get_time_units", "preview_time_units", "get_demand_response",
     "list_p2x_technologies", "preview_p2x_chain", "get_p2x_results",
     "list_plant_types", "get_plant_results",
     "list_conversions", "pypsa_io_capabilities", "describe_piecewise",
@@ -146,6 +146,8 @@ EXPENSIVE = {
     # Visible temporal and operations steps that rewrite weightings, snapshots or flags.
     "set_weightings_from_spacing", "sample_workbook",
     "make_noncyclic_for_rolling", "relax_maintenance",
+    # Writes the demand-response rows (dr_* buses, links, stores, elastic generators).
+    "apply_demand_response",
     # Screening: an upload stores a dataset; a promotion adds generators.
     "upload_siting_dataset", "promote_siting_sites",
     # Reducing / slicing / merging the model replaces it.

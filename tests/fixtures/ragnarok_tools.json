@@ -1176,6 +1176,18 @@
    "readOnly": false,
    "hasConfirm": true,
    "engineCheap": false
+  },
+  {
+   "name": "get_demand_response",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "apply_demand_response",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
   }
  ]
 }
