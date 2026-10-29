@@ -1094,6 +1094,42 @@
    "engineCheap": null
   },
   {
+   "name": "place_composite",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "detach_composite",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "list_composite_templates",
+   "readOnly": true,
+   "hasConfirm": false,
+   "engineCheap": null
+  },
+  {
+   "name": "save_composite_template",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "delete_composite_template",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
+   "name": "sync_composites",
+   "readOnly": false,
+   "hasConfirm": true,
+   "engineCheap": false
+  },
+  {
    "name": "siting_region_series",
    "readOnly": true,
    "hasConfirm": false,

@@ -68,7 +68,7 @@ READ_ONLY = {
     "get_carbon_price", "get_annual_budgets",
     "get_time_units", "preview_time_units", "get_demand_response",
     "list_p2x_technologies", "preview_p2x_chain", "get_p2x_results",
-    "list_plant_types", "get_plant_results",
+    "list_plant_types", "get_plant_results", "list_composite_templates",
     "list_conversions", "pypsa_io_capabilities", "describe_piecewise",
     "get_piecewise_curve", "check_piecewise_options", "describe_optimise_options",
     # The engine annotates these two as writing (they store a result in the
@@ -141,6 +141,9 @@ EXPENSIVE = {
     "add_conversion", "set_tab_module_enabled", "pypsa_earth_apply",
     # Plants and chains add or replace several components at once.
     "add_plant", "edit_plant", "remove_plant", "build_p2x_chain",
+    # Composites: placing on several buses, detaching, sheet sync and template saves / deletes rewrite rows or the template sheet.
+    "place_composite", "detach_composite", "sync_composites",
+    "save_composite_template", "delete_composite_template",
     # Writes horizon budgets into the model's component rows.
     "apply_annual_budgets",
     # Visible temporal and operations steps that rewrite weightings, snapshots or flags.
